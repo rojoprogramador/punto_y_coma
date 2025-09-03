@@ -1,0 +1,232 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum EstadoMesa {
+  DISPONIBLE
+  OCUPADA
+  RESERVADA
+  MANTENIMIENTO
+}
+
+enum EstadoPedido {
+  PENDIENTE
+  EN_PREPARACION
+  LISTO
+  ENTREGADO
+  CANCELADO
+}
+
+enum EstadoReserva {
+  ACTIVA
+  CONFIRMADA
+  CANCELADA
+  COMPLETADA
+}
+
+enum EstadoItemPedido {
+  PENDIENTE
+  EN_PREPARACION
+  LISTO
+  ENTREGADO
+}
+
+enum TipoUsuario {
+  ADMIN
+  MESERO
+  COCINERO
+  CAJERO
+}
+
+// Modelo Usuario
+model Usuario {
+  id         Int           @id @default(autoincrement())
+  nombre     String        @db.VarChar(100)
+  email      String        @unique @db.VarChar(100)
+  password   String        @db.VarChar(255)
+  rol        TipoUsuario
+  activo     Boolean       @default(true)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  
+  // Relaciones
+  pedidos    PedidoEnc[]
+  facturas   FacturaEnc[]
+  reservas   ReservaEnc[]
+  
+  @@map("usuarios")
+}
+
+// Modelo Mesa
+model Mesa {
+  id          Int         @id @default(autoincrement())
+  numero      Int         @unique
+  capacidad   Int
+  estado      EstadoMesa  @default(DISPONIBLE)
+  ubicacion   String?     @db.VarChar(100)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  // Relaciones
+  reservas    ReservaEnc[]
+  pedidos     PedidoEnc[]
+  
+  @@map("mesas")
+}
+
+// Modelo Artículo (Menú)
+model Articulo {
+  id           Int              @id @default(autoincrement())
+  nombre       String           @db.VarChar(100)
+  descripcion  String?          @db.Text
+  precio       Decimal          @db.Decimal(10, 2)
+  categoria    String           @db.VarChar(50)
+  disponible   Boolean          @default(true)
+  imagen       String?          @db.VarChar(255)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  
+  // Relaciones
+  pedidoDetalles   PedidoDet[]
+  facturaDetalles  FacturaDet[]
+  reservaDetalles  ReservaDet[]
+  
+  @@map("articulos")
+}
+
+// Modelo Reserva Encabezado
+model ReservaEnc {
+  id                Int             @id @default(autoincrement())
+  fechaReserva      DateTime
+  horaReserva       DateTime
+  numeroPersonas    Int
+  nombreCliente     String          @db.VarChar(100)
+  telefonoCliente   String?         @db.VarChar(20)
+  emailCliente      String?         @db.VarChar(100)
+  estado            EstadoReserva   @default(ACTIVA)
+  observaciones     String?         @db.Text
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relaciones
+  usuarioId         Int
+  usuario           Usuario         @relation(fields: [usuarioId], references: [id])
+  mesaId            Int
+  mesa              Mesa            @relation(fields: [mesaId], references: [id])
+  detalles          ReservaDet[]
+  
+  @@map("reservas_enc")
+}
+
+// Modelo Reserva Detalle
+model ReservaDet {
+  id             Int           @id @default(autoincrement())
+  cantidad       Int
+  precioUnitario Decimal       @db.Decimal(10, 2)
+  subtotal       Decimal       @db.Decimal(10, 2)
+  observaciones  String?       @db.VarChar(255)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  
+  // Relaciones
+  reservaId      Int
+  reserva        ReservaEnc    @relation(fields: [reservaId], references: [id])
+  articuloId     Int
+  articulo       Articulo      @relation(fields: [articuloId], references: [id])
+  
+  @@map("reservas_det")
+}
+
+// Modelo Pedido Encabezado
+model PedidoEnc {
+  id            Int           @id @default(autoincrement())
+  numeroPedido  String        @unique @db.VarChar(20)
+  fechaPedido   DateTime      @default(now())
+  estado        EstadoPedido  @default(PENDIENTE)
+  total         Decimal       @db.Decimal(10, 2)
+  observaciones String?       @db.Text
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  
+  // Relaciones
+  usuarioId     Int
+  usuario       Usuario       @relation(fields: [usuarioId], references: [id])
+  mesaId        Int
+  mesa          Mesa          @relation(fields: [mesaId], references: [id])
+  detalles      PedidoDet[]
+  factura       FacturaEnc?
+  
+  @@map("pedidos_enc")
+}
+
+// Modelo Pedido Detalle
+model PedidoDet {
+  id             Int               @id @default(autoincrement())
+  cantidad       Int
+  precioUnitario Decimal           @db.Decimal(10, 2)
+  subtotal       Decimal           @db.Decimal(10, 2)
+  estado         EstadoItemPedido  @default(PENDIENTE)
+  observaciones  String?           @db.VarChar(255)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  
+  // Relaciones
+  pedidoId       Int
+  pedido         PedidoEnc         @relation(fields: [pedidoId], references: [id])
+  articuloId     Int
+  articulo       Articulo          @relation(fields: [articuloId], references: [id])
+  
+  @@map("pedidos_det")
+}
+
+// Modelo Factura Encabezado
+model FacturaEnc {
+  id               Int           @id @default(autoincrement())
+  numeroFactura    String        @unique @db.VarChar(20)
+  fechaFactura     DateTime      @default(now())
+  nombreCliente    String?       @db.VarChar(100)
+  nifCliente       String?       @db.VarChar(20)
+  direccionCliente String?       @db.VarChar(255)
+  subtotal         Decimal       @db.Decimal(10, 2)
+  impuestos        Decimal       @db.Decimal(10, 2)
+  total            Decimal       @db.Decimal(10, 2)
+  metodoPago       String        @db.VarChar(50)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  
+  // Relaciones
+  usuarioId        Int
+  usuario          Usuario       @relation(fields: [usuarioId], references: [id])
+  pedidoId         Int           @unique
+  pedido           PedidoEnc     @relation(fields: [pedidoId], references: [id])
+  detalles         FacturaDet[]
+  
+  @@map("facturas_enc")
+}
+
+// Modelo Factura Detalle
+model FacturaDet {
+  id             Int           @id @default(autoincrement())
+  cantidad       Int
+  precioUnitario Decimal       @db.Decimal(10, 2)
+  subtotal       Decimal       @db.Decimal(10, 2)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  
+  // Relaciones
+  facturaId      Int
+  factura        FacturaEnc    @relation(fields: [facturaId], references: [id])
+  articuloId     Int
+  articulo       Articulo      @relation(fields: [articuloId], references: [id])
+  
+  @@map("facturas_det")
+}
