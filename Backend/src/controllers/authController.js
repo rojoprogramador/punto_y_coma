@@ -25,18 +25,55 @@ const authController = {
   // POST /api/auth/login
   login: async (req, res) => {
     try {
-      // TODO: Implementar lógica de login
-      // 1. Validar datos de entrada
-      // 2. Buscar usuario por email
-      // 3. Verificar password con bcrypt
-      // 4. Generar JWT token
-      // 5. Retornar token y datos del usuario
-      
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Login endpoint pendiente de implementación',
-        developer: 'Desarrollador 1 - rama: feature/auth'
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: 'Datos de entrada inválidos',
+          details: errors.array()
+        });
+      }
+
+      const { email, password } = req.body;
+
+      // Buscar usuario por email
+      const usuario = await prisma.usuario.findUnique({
+        where: { email }
       });
+
+      if (!usuario) {
+        return res.status(401).json({
+          error: 'Credenciales inválidas'
+        });
+      }
+
+      // Verificar password
+      const passwordValido = await bcrypt.compare(password, usuario.password);
+      if (!passwordValido) {
+        return res.status(401).json({
+          error: 'Credenciales inválidas'
+        });
+      }
+
+      // Generar JWT token
+      const token = jwt.sign(
+        { 
+          id: usuario.id, 
+          email: usuario.email, 
+          rol: usuario.rol 
+        },
+        process.env.JWT_SECRET || 'tu-secreto-jwt-aqui',
+        { expiresIn: '24h' }
+      );
+
+      // Retornar token y datos del usuario (sin password)
+      const { password: _, ...usuarioSinPassword } = usuario;
+      
+      res.json({
+        message: 'Login exitoso',
+        token,
+        usuario: usuarioSinPassword
+      });
+
     } catch (error) {
       console.error('Error en login:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
@@ -46,19 +83,62 @@ const authController = {
   // POST /api/auth/register
   register: async (req, res) => {
     try {
-      // TODO: Implementar lógica de registro
-      // 1. Validar datos de entrada
-      // 2. Verificar que el email no existe
-      // 3. Hash del password con bcrypt
-      // 4. Crear usuario en la BD
-      // 5. Generar JWT token
-      // 6. Retornar token y datos del usuario
-      
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Register endpoint pendiente de implementación',
-        developer: 'Desarrollador 1 - rama: feature/auth'
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: 'Datos de entrada inválidos',
+          details: errors.array()
+        });
+      }
+
+      const { nombre, email, password, rol } = req.body;
+
+      // Verificar que el email no existe
+      const usuarioExistente = await prisma.usuario.findUnique({
+        where: { email }
       });
+
+      if (usuarioExistente) {
+        return res.status(409).json({
+          error: 'El email ya está registrado'
+        });
+      }
+
+      // Hash del password
+      const saltRounds = 10;
+      const passwordHash = await bcrypt.hash(password, saltRounds);
+
+      // Crear usuario en la BD
+      const nuevoUsuario = await prisma.usuario.create({
+        data: {
+          nombre,
+          email,
+          password: passwordHash,
+          rol,
+          activo: true
+        }
+      });
+
+      // Generar JWT token
+      const token = jwt.sign(
+        { 
+          id: nuevoUsuario.id, 
+          email: nuevoUsuario.email, 
+          rol: nuevoUsuario.rol 
+        },
+        process.env.JWT_SECRET || 'tu-secreto-jwt-aqui',
+        { expiresIn: '24h' }
+      );
+
+      // Retornar token y datos del usuario (sin password)
+      const { password: _, ...usuarioSinPassword } = nuevoUsuario;
+      
+      res.status(201).json({
+        message: 'Usuario registrado exitosamente',
+        token,
+        usuario: usuarioSinPassword
+      });
+
     } catch (error) {
       console.error('Error en register:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
@@ -68,18 +148,50 @@ const authController = {
   // GET /api/auth/verify
   verifyToken: async (req, res) => {
     try {
-      // TODO: Implementar verificación de token
-      // 1. Obtener token del header Authorization
-      // 2. Verificar token con jwt.verify()
-      // 3. Buscar usuario en BD
-      // 4. Retornar datos del usuario
+      const authHeader = req.headers.authorization;
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Verify token endpoint pendiente de implementación',
-        developer: 'Desarrollador 1 - rama: feature/auth'
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({
+          error: 'Token no proporcionado o formato inválido'
+        });
+      }
+
+      const token = authHeader.substring(7); // Remover 'Bearer '
+
+      // Verificar token
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'tu-secreto-jwt-aqui');
+      
+      // Buscar usuario en BD
+      const usuario = await prisma.usuario.findUnique({
+        where: { id: decoded.id },
+        select: {
+          id: true,
+          nombre: true,
+          email: true,
+          rol: true,
+          activo: true,
+          createdAt: true
+        }
       });
+
+      if (!usuario || !usuario.activo) {
+        return res.status(401).json({
+          error: 'Usuario no encontrado o inactivo'
+        });
+      }
+
+      res.json({
+        message: 'Token válido',
+        usuario
+      });
+
     } catch (error) {
+      if (error.name === 'JsonWebTokenError') {
+        return res.status(401).json({ error: 'Token inválido' });
+      }
+      if (error.name === 'TokenExpiredError') {
+        return res.status(401).json({ error: 'Token expirado' });
+      }
       console.error('Error en verifyToken:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
     }
@@ -88,17 +200,56 @@ const authController = {
   // POST /api/auth/refresh
   refreshToken: async (req, res) => {
     try {
-      // TODO: Implementar refresh de token
-      // 1. Verificar refresh token
-      // 2. Generar nuevo access token
-      // 3. Retornar nuevo token
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: 'Datos de entrada inválidos',
+          details: errors.array()
+        });
+      }
+
+      const { refreshToken } = req.body;
+
+      // Verificar refresh token (por simplicidad, usamos el mismo secreto)
+      const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET || 'tu-secreto-jwt-aqui');
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Refresh token endpoint pendiente de implementación',
-        developer: 'Desarrollador 1 - rama: feature/auth'
+      // Buscar usuario
+      const usuario = await prisma.usuario.findUnique({
+        where: { id: decoded.id },
+        select: {
+          id: true,
+          email: true,
+          rol: true,
+          activo: true
+        }
       });
+
+      if (!usuario || !usuario.activo) {
+        return res.status(401).json({
+          error: 'Usuario no encontrado o inactivo'
+        });
+      }
+
+      // Generar nuevo token
+      const newToken = jwt.sign(
+        { 
+          id: usuario.id, 
+          email: usuario.email, 
+          rol: usuario.rol 
+        },
+        process.env.JWT_SECRET || 'tu-secreto-jwt-aqui',
+        { expiresIn: '24h' }
+      );
+
+      res.json({
+        message: 'Token renovado exitosamente',
+        token: newToken
+      });
+
     } catch (error) {
+      if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+        return res.status(401).json({ error: 'Refresh token inválido o expirado' });
+      }
       console.error('Error en refreshToken:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
     }
@@ -107,15 +258,10 @@ const authController = {
   // POST /api/auth/logout
   logout: async (req, res) => {
     try {
-      // TODO: Implementar logout
-      // 1. Invalidar token (opcional: blacklist)
-      // 2. Limpiar cookies si se usan
-      // 3. Retornar confirmación
-      
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Logout endpoint pendiente de implementación',
-        developer: 'Desarrollador 1 - rama: feature/auth'
+      // En una implementación más robusta, aquí se podría agregar el token a una blacklist
+      // Por simplicidad, solo retornamos un mensaje de confirmación
+      res.json({
+        message: 'Logout exitoso'
       });
     } catch (error) {
       console.error('Error en logout:', error);

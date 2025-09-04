@@ -6,9 +6,7 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const mesaController = require('../controllers/mesaController');
-// TODO: Importar middlewares cuando estén implementados
-// const authMiddleware = require('../middleware/auth');
-// const roleMiddleware = require('../middleware/role');
+const authMiddleware = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -54,10 +52,11 @@ router.get('/:id', [
     .withMessage('ID debe ser un número entero válido')
 ], mesaController.getMesaById);
 
-// TODO: POST /api/mesas/:id/asignar - Asignar mesa a cliente
+// POST /api/mesas/:id/asignar - Asignar mesa a cliente
 // Requiere autenticación y rol MESERO o ADMIN
-// Body debe incluir: clienteInfo (opcional)
 router.post('/:id/asignar', [
+  authMiddleware.verifyToken,
+  authMiddleware.requireMeseroOrAdmin(),
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID debe ser un número entero válido'),
@@ -75,18 +74,21 @@ router.post('/:id/asignar', [
     .withMessage('Teléfono debe tener formato válido')
 ], mesaController.asignarMesa);
 
-// TODO: POST /api/mesas/:id/liberar - Liberar mesa ocupada
+// POST /api/mesas/:id/liberar - Liberar mesa ocupada
 // Requiere autenticación y rol MESERO o ADMIN
 router.post('/:id/liberar', [
+  authMiddleware.verifyToken,
+  authMiddleware.requireMeseroOrAdmin(),
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID debe ser un número entero válido')
 ], mesaController.liberarMesa);
 
-// TODO: PUT /api/mesas/:id/estado - Cambiar estado de mesa
+// PUT /api/mesas/:id/estado - Cambiar estado de mesa
 // Requiere autenticación y rol MESERO o ADMIN
-// Body debe incluir: estado
 router.put('/:id/estado', [
+  authMiddleware.verifyToken,
+  authMiddleware.requireMeseroOrAdmin(),
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID debe ser un número entero válido'),
@@ -101,9 +103,10 @@ router.put('/:id/estado', [
     .withMessage('Motivo debe tener mínimo 5 caracteres')
 ], mesaController.cambiarEstadoMesa);
 
-// TODO: POST /api/mesas - Crear nueva mesa (solo ADMIN)
-// Body debe incluir: numero, capacidad, ubicacion (opcional)
+// POST /api/mesas - Crear nueva mesa (solo ADMIN)
 router.post('/', [
+  authMiddleware.verifyToken,
+  authMiddleware.requireAdmin(),
   body('numero')
     .isInt({ min: 1 })
     .withMessage('Número debe ser entero mayor a 0')
@@ -120,9 +123,10 @@ router.post('/', [
     .withMessage('Ubicación debe tener mínimo 3 caracteres')
 ], mesaController.crearMesa);
 
-// TODO: PUT /api/mesas/:id - Actualizar mesa (solo ADMIN)
-// Body puede incluir: numero, capacidad, ubicacion
+// PUT /api/mesas/:id - Actualizar mesa (solo ADMIN)
 router.put('/:id', [
+  authMiddleware.verifyToken,
+  authMiddleware.requireAdmin(),
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID debe ser un número entero válido'),
@@ -140,9 +144,10 @@ router.put('/:id', [
     .withMessage('Ubicación debe tener mínimo 3 caracteres')
 ], mesaController.actualizarMesa);
 
-// TODO: DELETE /api/mesas/:id - Eliminar mesa (solo ADMIN)
-// Solo se puede eliminar si no tiene pedidos/reservas asociadas
+// DELETE /api/mesas/:id - Eliminar mesa (solo ADMIN)
 router.delete('/:id', [
+  authMiddleware.verifyToken,
+  authMiddleware.requireAdmin(),
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID debe ser un número entero válido')

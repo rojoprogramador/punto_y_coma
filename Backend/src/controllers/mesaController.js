@@ -21,15 +21,16 @@ const mesaController = {
   // GET /api/mesas
   getMesas: async (req, res) => {
     try {
-      // TODO: Implementar obtener todas las mesas
-      // 1. Consultar todas las mesas de la BD
-      // 2. Incluir información de ocupación actual
-      // 3. Retornar lista de mesas con su estado
-      
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Get mesas endpoint pendiente de implementación',
-        developer: 'Desarrollador 2 - rama: feature/mesas'
+      const mesas = await prisma.mesa.findMany({
+        orderBy: {
+          numero: 'asc'
+        }
+      });
+
+      res.json({
+        message: 'Mesas obtenidas exitosamente',
+        mesas,
+        total: mesas.length
       });
     } catch (error) {
       console.error('Error en getMesas:', error);
@@ -40,15 +41,30 @@ const mesaController = {
   // GET /api/mesas/disponibles
   getMesasDisponibles: async (req, res) => {
     try {
-      // TODO: Implementar obtener mesas disponibles
-      // 1. Filtrar mesas con estado DISPONIBLE
-      // 2. Considerar capacidad si se especifica
-      // 3. Retornar mesas disponibles ordenadas
+      const { capacidad } = req.query;
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Get mesas disponibles endpoint pendiente de implementación',
-        developer: 'Desarrollador 2 - rama: feature/mesas'
+      const whereClause = {
+        estado: 'DISPONIBLE'
+      };
+      
+      if (capacidad) {
+        whereClause.capacidad = {
+          gte: parseInt(capacidad)
+        };
+      }
+
+      const mesasDisponibles = await prisma.mesa.findMany({
+        where: whereClause,
+        orderBy: [
+          { capacidad: 'asc' },
+          { numero: 'asc' }
+        ]
+      });
+
+      res.json({
+        message: 'Mesas disponibles obtenidas exitosamente',
+        mesas: mesasDisponibles,
+        total: mesasDisponibles.length
       });
     } catch (error) {
       console.error('Error en getMesasDisponibles:', error);
@@ -59,16 +75,42 @@ const mesaController = {
   // POST /api/mesas/:id/asignar
   asignarMesa: async (req, res) => {
     try {
-      // TODO: Implementar asignación de mesa
-      // 1. Verificar que la mesa existe y está disponible
-      // 2. Cambiar estado a OCUPADA
-      // 3. Registrar asignación con timestamp
-      // 4. Retornar confirmación
+      const { id } = req.params;
+      const mesaId = parseInt(id);
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Asignar mesa endpoint pendiente de implementación',
-        developer: 'Desarrollador 2 - rama: feature/mesas'
+      if (isNaN(mesaId)) {
+        return res.status(400).json({
+          error: 'ID de mesa inválido'
+        });
+      }
+
+      const mesa = await prisma.mesa.findUnique({
+        where: { id: mesaId }
+      });
+
+      if (!mesa) {
+        return res.status(404).json({
+          error: 'Mesa no encontrada'
+        });
+      }
+
+      if (mesa.estado !== 'DISPONIBLE') {
+        return res.status(409).json({
+          error: 'La mesa no está disponible',
+          estadoActual: mesa.estado
+        });
+      }
+
+      const mesaActualizada = await prisma.mesa.update({
+        where: { id: mesaId },
+        data: {
+          estado: 'OCUPADA'
+        }
+      });
+
+      res.json({
+        message: 'Mesa asignada exitosamente',
+        mesa: mesaActualizada
       });
     } catch (error) {
       console.error('Error en asignarMesa:', error);
@@ -79,16 +121,42 @@ const mesaController = {
   // POST /api/mesas/:id/liberar
   liberarMesa: async (req, res) => {
     try {
-      // TODO: Implementar liberación de mesa
-      // 1. Verificar que la mesa existe y está ocupada
-      // 2. Cambiar estado a DISPONIBLE
-      // 3. Limpiar datos de ocupación
-      // 4. Retornar confirmación
+      const { id } = req.params;
+      const mesaId = parseInt(id);
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Liberar mesa endpoint pendiente de implementación',
-        developer: 'Desarrollador 2 - rama: feature/mesas'
+      if (isNaN(mesaId)) {
+        return res.status(400).json({
+          error: 'ID de mesa inválido'
+        });
+      }
+
+      const mesa = await prisma.mesa.findUnique({
+        where: { id: mesaId }
+      });
+
+      if (!mesa) {
+        return res.status(404).json({
+          error: 'Mesa no encontrada'
+        });
+      }
+
+      if (mesa.estado !== 'OCUPADA') {
+        return res.status(409).json({
+          error: 'La mesa no está ocupada',
+          estadoActual: mesa.estado
+        });
+      }
+
+      const mesaActualizada = await prisma.mesa.update({
+        where: { id: mesaId },
+        data: {
+          estado: 'DISPONIBLE'
+        }
+      });
+
+      res.json({
+        message: 'Mesa liberada exitosamente',
+        mesa: mesaActualizada
       });
     } catch (error) {
       console.error('Error en liberarMesa:', error);
@@ -119,15 +187,28 @@ const mesaController = {
   // GET /api/mesas/:id
   getMesaById: async (req, res) => {
     try {
-      // TODO: Implementar obtener mesa por ID
-      // 1. Validar ID de mesa
-      // 2. Consultar mesa con relaciones
-      // 3. Retornar mesa o 404 si no existe
+      const { id } = req.params;
+      const mesaId = parseInt(id);
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Get mesa by ID endpoint pendiente de implementación',
-        developer: 'Desarrollador 2 - rama: feature/mesas'
+      if (isNaN(mesaId)) {
+        return res.status(400).json({
+          error: 'ID de mesa inválido'
+        });
+      }
+
+      const mesa = await prisma.mesa.findUnique({
+        where: { id: mesaId }
+      });
+
+      if (!mesa) {
+        return res.status(404).json({
+          error: 'Mesa no encontrada'
+        });
+      }
+
+      res.json({
+        message: 'Mesa obtenida exitosamente',
+        mesa
       });
     } catch (error) {
       console.error('Error en getMesaById:', error);
@@ -138,16 +219,39 @@ const mesaController = {
   // POST /api/mesas (solo admin)
   crearMesa: async (req, res) => {
     try {
-      // TODO: Implementar crear mesa
-      // 1. Validar datos de entrada
-      // 2. Verificar permisos de admin
-      // 3. Crear mesa en BD
-      // 4. Retornar mesa creada
-      
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Crear mesa endpoint pendiente de implementación',
-        developer: 'Desarrollador 2 - rama: feature/mesas'
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: 'Datos de entrada inválidos',
+          details: errors.array()
+        });
+      }
+
+      const { numero, capacidad, ubicacion } = req.body;
+
+      // Verificar que no exista una mesa con el mismo número
+      const mesaExistente = await prisma.mesa.findUnique({
+        where: { numero }
+      });
+
+      if (mesaExistente) {
+        return res.status(409).json({
+          error: 'Ya existe una mesa con ese número'
+        });
+      }
+
+      const nuevaMesa = await prisma.mesa.create({
+        data: {
+          numero,
+          capacidad,
+          ubicacion,
+          estado: 'DISPONIBLE'
+        }
+      });
+
+      res.status(201).json({
+        message: 'Mesa creada exitosamente',
+        mesa: nuevaMesa
       });
     } catch (error) {
       console.error('Error en crearMesa:', error);

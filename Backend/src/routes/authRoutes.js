@@ -6,8 +6,7 @@
 const express = require('express');
 const { body } = require('express-validator');
 const authController = require('../controllers/authController');
-// TODO: Importar middleware de autenticación cuando esté implementado
-// const authMiddleware = require('../middleware/auth');
+const authMiddleware = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -57,24 +56,18 @@ router.post('/register', [
     .withMessage('Rol es requerido')
 ], authController.register);
 
-// TODO: GET /api/auth/verify - Verificar token JWT
-// Debe usar middleware de autenticación
-// router.get('/verify', authMiddleware.verifyToken, authController.verifyToken);
+// GET /api/auth/verify - Verificar token JWT
 router.get('/verify', authController.verifyToken);
 
-// TODO: POST /api/auth/refresh - Renovar token
-// Validaciones necesarias:
-// - refreshToken: requerido
+// POST /api/auth/refresh - Renovar token
 router.post('/refresh', [
   body('refreshToken')
     .notEmpty()
     .withMessage('Refresh token es requerido')
 ], authController.refreshToken);
 
-// TODO: POST /api/auth/logout - Cerrar sesión
-// Debe usar middleware de autenticación
-// router.post('/logout', authMiddleware.verifyToken, authController.logout);
-router.post('/logout', authController.logout);
+// POST /api/auth/logout - Cerrar sesión
+router.post('/logout', authMiddleware.verifyToken, authController.logout);
 
 // TODO: Rutas adicionales que podrían ser necesarias:
 // POST /api/auth/forgot-password - Recuperar contraseña
