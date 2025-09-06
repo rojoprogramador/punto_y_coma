@@ -172,7 +172,32 @@ const mesaController = {
       // 2. Verificar permisos para el cambio
       // 3. Actualizar estado en BD
       // 4. Retornar mesa actualizada
-      
+      if (req.body.estado) {
+        console.log('Nuevo estado recibido:', req.body.estado);
+        // Validar nuevo estado
+        const estadosValidos = ['DISPONIBLE', 'OCUPADA', 'RESERVADA', 'MANTENIMIENTO'];
+        if (!estadosValidos.includes(req.body.estado)) {
+          return res.status(400).json({
+            error: 'Estado inválido',
+            estadosPermitidos: estadosValidos
+          });
+        }
+
+        // Verificar permisos para el cambio
+        // TODO: Implementar verificación de permisos
+
+        // Actualizar estado en BD
+        const mesaActualizada = await prisma.mesa.update({
+          where: { id: mesaId },
+          data: { estado: req.body.estado }
+        });
+
+        return res.json({
+          message: 'Estado de mesa actualizado exitosamente',
+          mesa: mesaActualizada
+        });
+      }
+
       res.status(501).json({
         error: 'Not implemented',
         message: 'Cambiar estado mesa endpoint pendiente de implementación',
@@ -267,6 +292,7 @@ const mesaController = {
       // 2. Verificar permisos de admin
       // 3. Actualizar mesa en BD
       // 4. Retornar mesa actualizada
+
       
       res.status(501).json({
         error: 'Not implemented',
