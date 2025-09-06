@@ -6,6 +6,7 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const facturaController = require('../controllers/facturaController');
+const authMiddleware = require('../middleware/auth');
 // TODO: Importar middlewares cuando estén implementados
 // const authMiddleware = require('../middleware/auth');
 // const roleMiddleware = require('../middleware/role');

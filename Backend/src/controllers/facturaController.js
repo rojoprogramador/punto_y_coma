@@ -11,7 +11,7 @@
 // - getEstadisticas: Estadísticas de facturación
 
 const { PrismaClient } = require('@prisma/client');
-const { validationResult } = require('express-validator');
+const { validationResult, check } = require('express-validator');
 
 const prisma = new PrismaClient();
 
@@ -20,18 +20,47 @@ const facturaController = {
   generarFactura: async (req, res) => {
     try {
       // TODO: Implementar generar factura
-      // 1. Validar que el pedido existe y está LISTO/ENTREGADO
+      // 1. Validar que el pedido existe y está LISTO.
       // 2. Verificar que no tenga factura ya generada
       // 3. Generar número de factura único
       // 4. Calcular subtotal, impuestos y total
       // 5. Crear factura con detalles
       // 6. Copiar items del pedido a factura detalles
       // 7. Retornar factura generada
-      
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Generar factura endpoint pendiente de implementación',
-        developer: 'Desarrollador 4 - rama: feature/facturas'
+
+      const { pedidoId, metodoPago, nombreCliente, total, usuarioId } = req.body;
+
+      const impuestos = 0.08 //? Impoconsumo 8%
+      let subtotal = total + (total * impuestos)
+
+      const ultimaFactura = await prisma.facturaEnc.findFirst({
+        orderBy: {
+          numeroFactura: "desc", // o el campo que uses como consecutivo
+        },
+        select: {
+          numeroFactura: true,
+        },
+      });
+
+      let ultimoNumero = ultimaFactura?.numeroFactura ?? 0;
+      ultimoNumero = Number(ultimoNumero)
+
+      const nuevaFactura = await prisma.facturaEnc.create({
+        data: {
+          numeroFactura: String(ultimoNumero + 1),
+          nombreCliente,
+          total,
+          impuestos: impuestos,
+          subtotal: subtotal,
+          metodoPago,
+          usuarioId,
+          pedidoId,
+        }
+      });
+
+      res.status(201).json({
+        message: 'Factura creada exitosamente',
+        mesa: nuevaFactura
       });
     } catch (error) {
       console.error('Error en generarFactura:', error);
@@ -48,11 +77,50 @@ const facturaController = {
       // 3. Incluir búsqueda por número de factura
       // 4. Ordenar por fecha desc por defecto
       // 5. Incluir datos del cliente y totales
-      
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Get facturas endpoint pendiente de implementación',
-        developer: 'Desarrollador 4 - rama: feature/facturas'
+
+      const { numeroFactura, fechaDesde, fechaHasta, cliente, metodoPago } = req.body;
+
+      const filtros = {};
+
+      // rango de fechas
+      if (fechaDesde && fechaHasta) {
+        filtros.fechaFactura = {
+          gte: new Date(fechaDesde),
+          lte: new Date(fechaHasta),
+        };
+      } else if (fechaDesde) {
+        filtros.fechaFactura = { gte: new Date(fechaDesde) };
+      } else if (fechaHasta) {
+        filtros.fechaFactura = { lte: new Date(fechaHasta) };
+      }
+
+      // cliente (ej. buscar por nombreCliente)
+      if (cliente) {
+        filtros.nombreCliente = {
+          contains: cliente,   // o "equals" si quieres coincidencia exacta
+        };
+      }
+
+      if (numeroFactura) {
+        filtros.numeroFactura = String(numeroFactura)
+      }
+
+      // método de pago
+      if (metodoPago) {
+        filtros.metodoPago = metodoPago;
+      }
+
+      const facturas = await prisma.facturaEnc.findMany({
+        where: filtros,
+        orderBy: {
+          fechaFactura: 'desc'
+        }
+      });
+     
+      res.json({
+        message: 'Facturas generadas',
+        mesas: facturas,
+        total: facturas.length
       });
     } catch (error) {
       console.error('Error en getFacturas:', error);
@@ -69,11 +137,23 @@ const facturaController = {
       // 3. Incluir datos del pedido original
       // 4. Verificar permisos de acceso
       // 5. Retornar factura completa o 404
+
+      const { id } = req.params;
+      const facturaId = parseInt(id);
+
+      const factura = await prisma.facturaEnc.findUnique({
+        where: { id: facturaId }
+      });
+
+      if (!factura) {
+        return res.status(404).json({
+          error: 'Factura no encontrada'
+        });
+      }
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Get factura by ID endpoint pendiente de implementación',
-        developer: 'Desarrollador 4 - rama: feature/facturas'
+      res.json({
+        message: 'Datos de la factura cargados exitosamente',
+        factura
       });
     } catch (error) {
       console.error('Error en getFacturaById:', error);
