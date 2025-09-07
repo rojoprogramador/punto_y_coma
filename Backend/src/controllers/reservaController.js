@@ -1,16 +1,3 @@
-// TODO: Implementar reservaController
-// Desarrollador 5 - Rama: devVernaza
-// 
-// Este controlador debe implementar:
-// - crearReserva: Crear nueva reserva
-// - getReservas: Obtener lista de reservas
-// - getReservaById: Obtener reserva por ID
-// - actualizarReserva: Modificar reserva existente
-// - cancelarReserva: Cancelar reserva
-// - confirmarReserva: Confirmar asistencia
-// - verificarDisponibilidad: Comprobar disponibilidad de mesa
-// - getReservasHoy: Reservas del día actual
-
 const { PrismaClient } = require('@prisma/client');
 const { validationResult } = require('express-validator');
 
@@ -20,19 +7,88 @@ const reservaController = {
   // POST /api/reservas
   crearReserva: async (req, res) => {
     try {
-      // TODO: Implementar crear reserva
-      // 1. Validar datos de entrada (fecha, hora, personas, etc.)
-      // 2. Verificar disponibilidad de mesa para fecha/hora
-      // 3. Validar que la fecha sea futura
-      // 4. Asignar mesa disponible con capacidad adecuada
-      // 5. Crear reserva con estado ACTIVA
-      // 6. Enviar confirmación (email/SMS) si está configurado
-      // 7. Retornar reserva creada
-      
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Crear reserva endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: 'Datos de entrada inválidos',
+          details: errors.array()
+        });
+      }
+
+      const { 
+        fechaReserva, 
+        horaReserva, 
+        numeroPersonas, 
+        nombreCliente, 
+        telefonoCliente, 
+        emailCliente, 
+        observaciones, 
+        mesaPreferida,
+        usuarioId = 1 // Valor por defecto, ajustar según tu lógica de autenticación
+      } = req.body;
+
+      // Buscar mesa disponible con capacidad adecuada
+      const mesaDisponible = await prisma.mesa.findFirst({
+        where: {
+          capacidad: { gte: numeroPersonas },
+          estado: 'DISPONIBLE',
+          ...(mesaPreferida && { id: mesaPreferida })
+        },
+        orderBy: { capacidad: 'asc' }
+      });
+
+      if (!mesaDisponible) {
+        return res.status(409).json({
+          error: 'No hay mesas disponibles para la capacidad solicitada'
+        });
+      }
+
+      // Crear fecha y hora completa para la reserva
+      const fechaCompleta = new Date(fechaReserva);
+      const [horas, minutos] = horaReserva.split(':');
+      const horaCompleta = new Date(fechaCompleta);
+      horaCompleta.setHours(parseInt(horas), parseInt(minutos), 0, 0);
+
+      // Verificar que no haya conflicto de horario
+      const conflictoReserva = await prisma.reservaEnc.findFirst({
+        where: {
+          mesaId: mesaDisponible.id,
+          fechaReserva: fechaCompleta,
+          horaReserva: horaCompleta,
+          estado: { in: ['ACTIVA', 'CONFIRMADA'] }
+        }
+      });
+
+      if (conflictoReserva) {
+        return res.status(409).json({
+          error: 'La mesa ya está reservada para esa fecha y hora'
+        });
+      }
+
+      const nuevaReserva = await prisma.reservaEnc.create({
+        data: {
+          fechaReserva: fechaCompleta,
+          horaReserva: horaCompleta,
+          numeroPersonas,
+          nombreCliente,
+          telefonoCliente,
+          emailCliente,
+          observaciones,
+          estado: 'ACTIVA',
+          usuarioId,
+          mesaId: mesaDisponible.id
+        },
+        include: {
+          mesa: true,
+          usuario: {
+            select: { nombre: true }
+          }
+        }
+      });
+
+      res.status(201).json({
+        message: 'Reserva creada exitosamente',
+        reserva: nuevaReserva
       });
     } catch (error) {
       console.error('Error en crearReserva:', error);
@@ -43,17 +99,66 @@ const reservaController = {
   // GET /api/reservas
   getReservas: async (req, res) => {
     try {
-      // TODO: Implementar obtener reservas
-      // 1. Aplicar filtros (fecha, estado, mesa, cliente)
-      // 2. Implementar paginación
-      // 3. Incluir búsqueda por nombre/teléfono de cliente
-      // 4. Ordenar por fecha/hora de reserva
-      // 5. Incluir datos de mesa y cliente
+      const { fechaDesde, fechaHasta, estado, mesa, cliente, page = 1, limit = 10 } = req.query;
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Get reservas endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
+      const whereClause = {};
+      
+      if (fechaDesde && fechaHasta) {
+        whereClause.fechaReserva = {
+          gte: new Date(fechaDesde),
+          lte: new Date(fechaHasta)
+        };
+      } else if (fechaDesde) {
+        whereClause.fechaReserva = { gte: new Date(fechaDesde) };
+      } else if (fechaHasta) {
+        whereClause.fechaReserva = { lte: new Date(fechaHasta) };
+      }
+      
+      if (estado) whereClause.estado = estado;
+      if (mesa) whereClause.mesaId = parseInt(mesa);
+      if (cliente) {
+        whereClause.nombreCliente = {
+          contains: cliente,
+          mode: 'insensitive'
+        };
+      }
+
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+
+      const [reservas, total] = await Promise.all([
+        prisma.reservaEnc.findMany({
+          where: whereClause,
+          include: {
+            mesa: true,
+            usuario: { 
+              select: { nombre: true } 
+            }
+          },
+          orderBy: [
+            { fechaReserva: 'desc' },
+            { horaReserva: 'asc' }
+          ],
+          skip,
+          take: parseInt(limit)
+        }),
+        prisma.reservaEnc.count({ where: whereClause })
+      ]);
+
+      // Formatear las reservas para incluir la hora como string
+      const reservasFormateadas = reservas.map(reserva => ({
+        ...reserva,
+        horaReservaString: reserva.horaReserva.toTimeString().slice(0, 5) // HH:mm
+      }));
+
+      res.json({
+        message: 'Reservas obtenidas exitosamente',
+        reservas: reservasFormateadas,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(total / parseInt(limit))
+        }
       });
     } catch (error) {
       console.error('Error en getReservas:', error);
@@ -64,16 +169,45 @@ const reservaController = {
   // GET /api/reservas/:id
   getReservaById: async (req, res) => {
     try {
-      // TODO: Implementar obtener reserva por ID
-      // 1. Validar ID de reserva
-      // 2. Incluir todas las relaciones (mesa, detalles, usuario)
-      // 3. Verificar permisos de acceso
-      // 4. Retornar reserva completa o 404
+      const { id } = req.params;
+      const reservaId = parseInt(id);
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Get reserva by ID endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
+      if (isNaN(reservaId)) {
+        return res.status(400).json({
+          error: 'ID de reserva inválido'
+        });
+      }
+
+      const reserva = await prisma.reservaEnc.findUnique({
+        where: { id: reservaId },
+        include: {
+          mesa: true,
+          usuario: { 
+            select: { nombre: true } 
+          },
+          detalles: {
+            include: {
+              articulo: true
+            }
+          }
+        }
+      });
+
+      if (!reserva) {
+        return res.status(404).json({
+          error: 'Reserva no encontrada'
+        });
+      }
+
+      // Formatear la reserva para incluir la hora como string
+      const reservaFormateada = {
+        ...reserva,
+        horaReservaString: reserva.horaReserva.toTimeString().slice(0, 5)
+      };
+
+      res.json({
+        message: 'Reserva obtenida exitosamente',
+        reserva: reservaFormateada
       });
     } catch (error) {
       console.error('Error en getReservaById:', error);
@@ -84,17 +218,79 @@ const reservaController = {
   // PUT /api/reservas/:id
   actualizarReserva: async (req, res) => {
     try {
-      // TODO: Implementar actualizar reserva
-      // 1. Validar que la reserva existe y se puede modificar
-      // 2. Verificar nueva disponibilidad si cambia fecha/hora
-      // 3. Reasignar mesa si cambia número de personas
-      // 4. Actualizar datos de la reserva
-      // 5. Notificar cambios al cliente si es necesario
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: 'Datos de entrada inválidos',
+          details: errors.array()
+        });
+      }
+
+      const { id } = req.params;
+      const reservaId = parseInt(id);
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Actualizar reserva endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
+      if (isNaN(reservaId)) {
+        return res.status(400).json({
+          error: 'ID de reserva inválido'
+        });
+      }
+
+      const reservaExistente = await prisma.reservaEnc.findUnique({
+        where: { id: reservaId }
+      });
+
+      if (!reservaExistente) {
+        return res.status(404).json({
+          error: 'Reserva no encontrada'
+        });
+      }
+
+      if (reservaExistente.estado !== 'ACTIVA') {
+        return res.status(409).json({
+          error: 'Solo se pueden modificar reservas en estado ACTIVA'
+        });
+      }
+
+      const { fechaReserva, horaReserva, numeroPersonas, nombreCliente, telefonoCliente, emailCliente, observaciones } = req.body;
+
+      const datosActualizacion = {};
+      
+      if (fechaReserva) datosActualizacion.fechaReserva = new Date(fechaReserva);
+      
+      if (horaReserva) {
+        const fechaBase = datosActualizacion.fechaReserva || reservaExistente.fechaReserva;
+        const [horas, minutos] = horaReserva.split(':');
+        const horaCompleta = new Date(fechaBase);
+        horaCompleta.setHours(parseInt(horas), parseInt(minutos), 0, 0);
+        datosActualizacion.horaReserva = horaCompleta;
+      }
+      
+      if (numeroPersonas) datosActualizacion.numeroPersonas = numeroPersonas;
+      if (nombreCliente) datosActualizacion.nombreCliente = nombreCliente;
+      if (telefonoCliente) datosActualizacion.telefonoCliente = telefonoCliente;
+      if (emailCliente) datosActualizacion.emailCliente = emailCliente;
+      if (observaciones) datosActualizacion.observaciones = observaciones;
+
+      const reservaActualizada = await prisma.reservaEnc.update({
+        where: { id: reservaId },
+        data: datosActualizacion,
+        include: {
+          mesa: true,
+          usuario: {
+            select: { nombre: true }
+          }
+        }
+      });
+
+      // Formatear la reserva actualizada
+      const reservaFormateada = {
+        ...reservaActualizada,
+        horaReservaString: reservaActualizada.horaReserva.toTimeString().slice(0, 5)
+      };
+
+      res.json({
+        message: 'Reserva actualizada exitosamente',
+        reserva: reservaFormateada
       });
     } catch (error) {
       console.error('Error en actualizarReserva:', error);
@@ -105,17 +301,53 @@ const reservaController = {
   // PUT /api/reservas/:id/cancelar
   cancelarReserva: async (req, res) => {
     try {
-      // TODO: Implementar cancelar reserva
-      // 1. Validar que la reserva existe y se puede cancelar
-      // 2. Cambiar estado a CANCELADA
-      // 3. Liberar mesa asignada
-      // 4. Registrar motivo de cancelación
-      // 5. Notificar cancelación al cliente
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: 'Datos de entrada inválidos',
+          details: errors.array()
+        });
+      }
+
+      const { id } = req.params;
+      const reservaId = parseInt(id);
+      const { motivo } = req.body;
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Cancelar reserva endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
+      if (isNaN(reservaId)) {
+        return res.status(400).json({
+          error: 'ID de reserva inválido'
+        });
+      }
+
+      const reserva = await prisma.reservaEnc.findUnique({
+        where: { id: reservaId }
+      });
+
+      if (!reserva) {
+        return res.status(404).json({
+          error: 'Reserva no encontrada'
+        });
+      }
+
+      if (!['ACTIVA', 'CONFIRMADA'].includes(reserva.estado)) {
+        return res.status(409).json({
+          error: 'Solo se pueden cancelar reservas ACTIVAS o CONFIRMADAS'
+        });
+      }
+
+      const reservaCancelada = await prisma.reservaEnc.update({
+        where: { id: reservaId },
+        data: {
+          estado: 'CANCELADA',
+          observaciones: reserva.observaciones ? 
+            `${reserva.observaciones}\n\nCANCELADA: ${motivo}` : 
+            `CANCELADA: ${motivo}`
+        }
+      });
+
+      res.json({
+        message: 'Reserva cancelada exitosamente',
+        reserva: reservaCancelada
       });
     } catch (error) {
       console.error('Error en cancelarReserva:', error);
@@ -126,17 +358,46 @@ const reservaController = {
   // PUT /api/reservas/:id/confirmar
   confirmarReserva: async (req, res) => {
     try {
-      // TODO: Implementar confirmar reserva
-      // 1. Validar que la reserva existe y está ACTIVA
-      // 2. Verificar que es el día de la reserva
-      // 3. Cambiar estado a CONFIRMADA
-      // 4. Cambiar estado de mesa a RESERVADA
-      // 5. Registrar hora de confirmación
+      const { id } = req.params;
+      const reservaId = parseInt(id);
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Confirmar reserva endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
+      if (isNaN(reservaId)) {
+        return res.status(400).json({
+          error: 'ID de reserva inválido'
+        });
+      }
+
+      const reserva = await prisma.reservaEnc.findUnique({
+        where: { id: reservaId },
+        include: { mesa: true }
+      });
+
+      if (!reserva) {
+        return res.status(404).json({
+          error: 'Reserva no encontrada'
+        });
+      }
+
+      if (reserva.estado !== 'ACTIVA') {
+        return res.status(409).json({
+          error: 'Solo se pueden confirmar reservas ACTIVAS'
+        });
+      }
+
+      const [reservaConfirmada] = await Promise.all([
+        prisma.reservaEnc.update({
+          where: { id: reservaId },
+          data: { estado: 'CONFIRMADA' }
+        }),
+        prisma.mesa.update({
+          where: { id: reserva.mesaId },
+          data: { estado: 'RESERVADA' }
+        })
+      ]);
+
+      res.json({
+        message: 'Reserva confirmada exitosamente',
+        reserva: reservaConfirmada
       });
     } catch (error) {
       console.error('Error en confirmarReserva:', error);
@@ -147,17 +408,61 @@ const reservaController = {
   // POST /api/reservas/verificar-disponibilidad
   verificarDisponibilidad: async (req, res) => {
     try {
-      // TODO: Implementar verificar disponibilidad
-      // 1. Validar parámetros (fecha, hora, número personas)
-      // 2. Buscar mesas disponibles con capacidad adecuada
-      // 3. Verificar conflictos con otras reservas
-      // 4. Considerar tiempo de ocupación típico
-      // 5. Retornar mesas disponibles y horarios alternativos
-      
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Verificar disponibilidad endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: 'Datos de entrada inválidos',
+          details: errors.array()
+        });
+      }
+
+      const { fechaReserva, horaReserva, numeroPersonas } = req.body;
+
+      const mesasDisponibles = await prisma.mesa.findMany({
+        where: {
+          capacidad: { gte: numeroPersonas },
+          estado: 'DISPONIBLE'
+        },
+        orderBy: { capacidad: 'asc' }
+      });
+
+      if (mesasDisponibles.length === 0) {
+        return res.status(404).json({
+          error: 'No hay mesas disponibles para la capacidad solicitada',
+          mesasDisponibles: []
+        });
+      }
+
+      // Crear fecha y hora completa para verificación
+      const fechaCompleta = new Date(fechaReserva);
+      const [horas, minutos] = horaReserva.split(':');
+      const horaCompleta = new Date(fechaCompleta);
+      horaCompleta.setHours(parseInt(horas), parseInt(minutos), 0, 0);
+
+      // Verificar conflictos de horario
+      const mesasLibres = [];
+      for (const mesa of mesasDisponibles) {
+        const conflicto = await prisma.reservaEnc.findFirst({
+          where: {
+            mesaId: mesa.id,
+            fechaReserva: fechaCompleta,
+            horaReserva: horaCompleta,
+            estado: { in: ['ACTIVA', 'CONFIRMADA'] }
+          }
+        });
+
+        if (!conflicto) {
+          mesasLibres.push(mesa);
+        }
+      }
+
+      res.json({
+        message: 'Disponibilidad verificada exitosamente',
+        fechaReserva,
+        horaReserva,
+        numeroPersonas,
+        mesasDisponibles: mesasLibres,
+        hayDisponibilidad: mesasLibres.length > 0
       });
     } catch (error) {
       console.error('Error en verificarDisponibilidad:', error);
@@ -168,17 +473,46 @@ const reservaController = {
   // GET /api/reservas/hoy
   getReservasHoy: async (req, res) => {
     try {
-      // TODO: Implementar reservas del día
-      // 1. Filtrar reservas para la fecha actual
-      // 2. Ordenar por hora de reserva
-      // 3. Incluir información de mesa y estado
-      // 4. Resaltar reservas próximas o atrasadas
-      // 5. Incluir estadísticas del día
-      
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Get reservas hoy endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
+      const hoy = new Date();
+      hoy.setHours(0, 0, 0, 0);
+      const manana = new Date(hoy);
+      manana.setDate(manana.getDate() + 1);
+
+      const reservasHoy = await prisma.reservaEnc.findMany({
+        where: {
+          fechaReserva: {
+            gte: hoy,
+            lt: manana
+          }
+        },
+        include: {
+          mesa: true,
+          usuario: {
+            select: { nombre: true }
+          }
+        },
+        orderBy: { horaReserva: 'asc' }
+      });
+
+      // Formatear las reservas
+      const reservasFormateadas = reservasHoy.map(reserva => ({
+        ...reserva,
+        horaReservaString: reserva.horaReserva.toTimeString().slice(0, 5)
+      }));
+
+      const estadisticas = {
+        total: reservasFormateadas.length,
+        activas: reservasFormateadas.filter(r => r.estado === 'ACTIVA').length,
+        confirmadas: reservasFormateadas.filter(r => r.estado === 'CONFIRMADA').length,
+        completadas: reservasFormateadas.filter(r => r.estado === 'COMPLETADA').length,
+        canceladas: reservasFormateadas.filter(r => r.estado === 'CANCELADA').length
+      };
+
+      res.json({
+        message: 'Reservas del día obtenidas exitosamente',
+        fecha: hoy.toISOString().split('T')[0],
+        reservas: reservasFormateadas,
+        estadisticas
       });
     } catch (error) {
       console.error('Error en getReservasHoy:', error);
@@ -189,17 +523,46 @@ const reservaController = {
   // PUT /api/reservas/:id/completar
   completarReserva: async (req, res) => {
     try {
-      // TODO: Implementar completar reserva
-      // 1. Validar que la reserva está CONFIRMADA
-      // 2. Cambiar estado a COMPLETADA
-      // 3. Liberar mesa para nuevas asignaciones
-      // 4. Registrar hora de finalización
-      // 5. Opcionalmente solicitar feedback
+      const { id } = req.params;
+      const reservaId = parseInt(id);
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Completar reserva endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
+      if (isNaN(reservaId)) {
+        return res.status(400).json({
+          error: 'ID de reserva inválido'
+        });
+      }
+
+      const reserva = await prisma.reservaEnc.findUnique({
+        where: { id: reservaId },
+        include: { mesa: true }
+      });
+
+      if (!reserva) {
+        return res.status(404).json({
+          error: 'Reserva no encontrada'
+        });
+      }
+
+      if (reserva.estado !== 'CONFIRMADA') {
+        return res.status(409).json({
+          error: 'Solo se pueden completar reservas CONFIRMADAS'
+        });
+      }
+
+      const [reservaCompletada] = await Promise.all([
+        prisma.reservaEnc.update({
+          where: { id: reservaId },
+          data: { estado: 'COMPLETADA' }
+        }),
+        prisma.mesa.update({
+          where: { id: reserva.mesaId },
+          data: { estado: 'DISPONIBLE' }
+        })
+      ]);
+
+      res.json({
+        message: 'Reserva completada exitosamente',
+        reserva: reservaCompletada
       });
     } catch (error) {
       console.error('Error en completarReserva:', error);
