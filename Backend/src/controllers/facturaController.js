@@ -18,49 +18,65 @@ const prisma = new PrismaClient();
 const facturaController = {
   // POST /api/facturas/generar/:pedidoId
   generarFactura: async (req, res) => {
-    try {
-      // TODO: Implementar generar factura
-      // 1. Validar que el pedido existe y está LISTO.
-      // 2. Verificar que no tenga factura ya generada
-      // 3. Generar número de factura único
-      // 4. Calcular subtotal, impuestos y total
-      // 5. Crear factura con detalles
-      // 6. Copiar items del pedido a factura detalles
-      // 7. Retornar factura generada
+  try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: 'Datos de entrada inválidos',
+          details: errors.array()
+        });
+      }
 
       const { pedidoId, metodoPago, nombreCliente, total, usuarioId } = req.body;
 
-      const impuestos = 0.08 //? Impoconsumo 8%
-      let subtotal = total + (total * impuestos)
+      const impuestos = 0.08; //? Impoconsumo 8%.
+      const subtotal = total + (total * impuestos);
 
+      //? Obteniendo último número de factura.
       const ultimaFactura = await prisma.facturaEnc.findFirst({
-        orderBy: {
-          numeroFactura: "desc", // o el campo que uses como consecutivo
-        },
-        select: {
-          numeroFactura: true,
-        },
+        orderBy: { numeroFactura: "desc" },
+        select: { numeroFactura: true },
       });
 
-      let ultimoNumero = ultimaFactura?.numeroFactura ?? 0;
-      ultimoNumero = Number(ultimoNumero)
+      let ultimoNumero = Number(ultimaFactura?.numeroFactura ?? 0);
 
+      //? 1. Creando la factura.
       const nuevaFactura = await prisma.facturaEnc.create({
         data: {
           numeroFactura: String(ultimoNumero + 1),
           nombreCliente,
           total,
-          impuestos: impuestos,
-          subtotal: subtotal,
+          impuestos,
+          subtotal,
           metodoPago,
           usuarioId,
           pedidoId,
-        }
+        },
       });
+
+      //? 2. Obteniendo los items del pedido.
+      const itemsPedido = await prisma.pedidoDet.findMany({
+        where: { pedidoId },
+      });
+
+      //? 3. Creando los detalles de factura copiando los detalles del pedido.
+      if (itemsPedido.length > 0) {
+        const detallesFactura = itemsPedido.map(item => ({
+          facturaId: nuevaFactura.id,
+          articuloId: item.articuloId,
+          cantidad: item.cantidad,
+          precioUnitario: item.precioUnitario,
+          subtotal: item.cantidad * item.precioUnitario
+        }));
+
+        await prisma.facturaDet.createMany({
+          data: detallesFactura,
+        });
+      }
 
       res.status(201).json({
         message: 'Factura creada exitosamente',
-        mesa: nuevaFactura
+        factura: nuevaFactura
       });
     } catch (error) {
       console.error('Error en generarFactura:', error);
@@ -116,10 +132,10 @@ const facturaController = {
           fechaFactura: 'desc'
         }
       });
-     
-      res.json({
+      
+      res.status(200).json({
         message: 'Facturas generadas',
-        mesas: facturas,
+        factura: facturas,
         total: facturas.length
       });
     } catch (error) {
@@ -151,9 +167,28 @@ const facturaController = {
         });
       }
       
-      res.json({
+      res.status(200).json({
         message: 'Datos de la factura cargados exitosamente',
-        factura
+        factura: factura
+      });
+    } catch (error) {
+      console.error('Error en getFacturaById:', error);
+      res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  },
+
+  getDetallesByFacturaId: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const facturaId = parseInt(id); 
+
+      const detallesFactura = await prisma.facturaDet.findMany({
+        where: { facturaId: facturaId }
+      });
+      
+      res.status(200).json({
+        message: 'Datos de la factura cargados exitosamente',
+        detalles: detallesFactura
       });
     } catch (error) {
       console.error('Error en getFacturaById:', error);
@@ -170,12 +205,24 @@ const facturaController = {
       // 3. Marcar factura como anulada
       // 4. Registrar motivo de anulación
       // 5. Actualizar estadísticas si es necesario
-      
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Anular factura endpoint pendiente de implementación',
-        developer: 'Desarrollador 4 - rama: feature/facturas'
+
+      const { id } = req.params;
+      const facturaId = parseInt(id);
+
+      const facturaAnulada = await prisma.facturaEnc.update({
+        where: {
+          id: facturaId,
+        },
+        data: {
+          estado: "ANULADA",
+        },
       });
+      
+      res.status(200).json({
+        message: 'Factura correctamente anulada.',
+        factura: facturaAnulada
+      });
+
     } catch (error) {
       console.error('Error en anularFactura:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
@@ -250,6 +297,7 @@ const facturaController = {
   // GET /api/facturas/numero/:numero
   getFacturaPorNumero: async (req, res) => {
     try {
+      //! No necesario, ya que el filtro entra en la busqueda general.
       // TODO: Implementar búsqueda por número
       // 1. Buscar factura por número exacto
       // 2. Incluir detalles completos
