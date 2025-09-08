@@ -96,6 +96,8 @@ const mesaHelpers = {
   }
 };
 
+
+
 const mesaController = {
   // GET /api/mesas
   getMesas: async (req, res) => {
@@ -156,21 +158,18 @@ const mesaController = {
     try {
       const { id } = req.params;
       const mesa = await mesaHelpers.buscarMesaPorId(id);
-
       if (mesa.estado !== 'DISPONIBLE') {
         return res.status(409).json({
           error: 'La mesa no está disponible',
           estadoActual: mesa.estado
         });
       }
-
       const mesaActualizada = await prisma.mesa.update({
         where: { id: mesa.id },
         data: {
           estado: 'OCUPADA'
         }
       });
-
       res.json({
         message: 'Mesa asignada exitosamente',
         mesa: mesaActualizada
@@ -185,21 +184,18 @@ const mesaController = {
     try {
       const { id } = req.params;
       const mesa = await mesaHelpers.buscarMesaPorId(id);
-
       if (mesa.estado !== 'OCUPADA') {
         return res.status(409).json({
           error: 'La mesa no está ocupada',
           estadoActual: mesa.estado
         });
       }
-
       const mesaActualizada = await prisma.mesa.update({
         where: { id: mesa.id },
         data: {
           estado: 'DISPONIBLE'
         }
       });
-
       res.json({
         message: 'Mesa liberada exitosamente',
         mesa: mesaActualizada
@@ -213,36 +209,21 @@ const mesaController = {
   cambiarEstadoMesa: async (req, res) => {
     try {
       mesaHelpers.manejarErroresValidacion(req);
-      
       const { id } = req.params;
       const { estado, motivo } = req.body;
       const mesa = await mesaHelpers.buscarMesaPorId(id);
-
-      // Validar estado válido
-      const estadosValidos = ['DISPONIBLE', 'OCUPADA', 'RESERVADA', 'MANTENIMIENTO'];
-      if (!estadosValidos.includes(estado)) {
-        return res.status(400).json({
-          error: 'Estado inválido',
-          estadosPermitidos: estadosValidos
-        });
-      }
-
-      // Verificar que el estado es diferente al actual
       if (mesa.estado === estado) {
         return res.status(409).json({
           error: 'La mesa ya tiene ese estado',
           estadoActual: mesa.estado
         });
       }
-
-      // Validar transiciones de estado permitidas
       const transicionesPermitidas = {
         'DISPONIBLE': ['OCUPADA', 'RESERVADA', 'MANTENIMIENTO'],
         'OCUPADA': ['DISPONIBLE', 'MANTENIMIENTO'],
         'RESERVADA': ['DISPONIBLE', 'OCUPADA', 'MANTENIMIENTO'],
         'MANTENIMIENTO': ['DISPONIBLE']
       };
-
       if (!transicionesPermitidas[mesa.estado]?.includes(estado)) {
         return res.status(409).json({
           error: 'Transición de estado no permitida',
@@ -251,8 +232,6 @@ const mesaController = {
           transicionesPermitidas: transicionesPermitidas[mesa.estado]
         });
       }
-
-      // Actualizar estado en BD
       const mesaActualizada = await prisma.mesa.update({
         where: { id: mesa.id },
         data: {
@@ -260,7 +239,6 @@ const mesaController = {
           ...(motivo && { observaciones: motivo })
         }
       });
-
       res.json({
         message: 'Estado de mesa actualizado exitosamente',
         mesa: mesaActualizada,
@@ -281,7 +259,6 @@ const mesaController = {
     try {
       const { id } = req.params;
       const mesa = await mesaHelpers.buscarMesaPorId(id);
-
       res.json({
         message: 'Mesa obtenida exitosamente',
         mesa
@@ -295,20 +272,16 @@ const mesaController = {
   crearMesa: async (req, res) => {
     try {
       mesaHelpers.manejarErroresValidacion(req);
-
       const { numero, capacidad, ubicacion } = req.body;
-
       // Verificar que no exista una mesa con el mismo número
       const mesaExistente = await prisma.mesa.findUnique({
         where: { numero }
       });
-
       if (mesaExistente) {
         return res.status(409).json({
           error: 'Ya existe una mesa con ese número'
         });
       }
-
       const nuevaMesa = await prisma.mesa.create({
         data: {
           numero,
@@ -317,7 +290,6 @@ const mesaController = {
           estado: 'DISPONIBLE'
         }
       });
-
       res.status(201).json({
         message: 'Mesa creada exitosamente',
         mesa: nuevaMesa
@@ -331,42 +303,32 @@ const mesaController = {
   actualizarMesa: async (req, res) => {
     try {
       mesaHelpers.manejarErroresValidacion(req);
-      
       const { id } = req.params;
       const { numero, capacidad, ubicacion } = req.body;
       const mesa = await mesaHelpers.buscarMesaPorId(id);
-
-      // Verificar si se está cambiando el número y ya existe otra mesa con ese número
       if (numero && numero !== mesa.numero) {
         const mesaExistente = await prisma.mesa.findUnique({
           where: { numero }
         });
-
         if (mesaExistente) {
           return res.status(409).json({
             error: 'Ya existe una mesa con ese número'
           });
         }
       }
-
-      // Preparar datos para actualizar (solo campos proporcionados)
       const datosActualizacion = {};
       if (numero !== undefined) datosActualizacion.numero = numero;
       if (capacidad !== undefined) datosActualizacion.capacidad = capacidad;
       if (ubicacion !== undefined) datosActualizacion.ubicacion = ubicacion;
-
-      // Si no hay campos para actualizar
       if (Object.keys(datosActualizacion).length === 0) {
         return res.status(400).json({
           error: 'No se proporcionaron campos para actualizar'
         });
       }
-
       const mesaActualizada = await prisma.mesa.update({
         where: { id: mesa.id },
         data: datosActualizacion
       });
-
       res.json({
         message: 'Mesa actualizada exitosamente',
         mesa: mesaActualizada,
@@ -381,39 +343,29 @@ const mesaController = {
   eliminarMesa: async (req, res) => {
     try {
       mesaHelpers.manejarErroresValidacion(req);
-      
       const { id } = req.params;
       const mesa = await mesaHelpers.buscarMesaPorId(id, true);
-
-      // Verificar que la mesa no esté en uso
       if (mesa.estado === 'OCUPADA') {
         return res.status(409).json({
           error: 'No se puede eliminar una mesa ocupada',
           estadoActual: mesa.estado
         });
       }
-
-      // Verificar que no tenga pedidos activos
       if (mesa.pedidos && mesa.pedidos.length > 0) {
         return res.status(409).json({
           error: 'No se puede eliminar una mesa con pedidos activos',
           pedidosActivos: mesa.pedidos.length
         });
       }
-
-      // Verificar que no tenga reservas futuras
       if (mesa.reservas && mesa.reservas.length > 0) {
         return res.status(409).json({
           error: 'No se puede eliminar una mesa con reservas futuras',
           reservasFuturas: mesa.reservas.length
         });
       }
-
-      // Eliminar la mesa
       await prisma.mesa.delete({
         where: { id: mesa.id }
       });
-
       res.json({
         message: 'Mesa eliminada exitosamente',
         mesaEliminada: {
