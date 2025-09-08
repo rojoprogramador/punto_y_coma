@@ -218,6 +218,15 @@ const mesaController = {
       const { estado, motivo } = req.body;
       const mesa = await mesaHelpers.buscarMesaPorId(id);
 
+      // Validar estado válido
+      const estadosValidos = ['DISPONIBLE', 'OCUPADA', 'RESERVADA', 'MANTENIMIENTO'];
+      if (!estadosValidos.includes(estado)) {
+        return res.status(400).json({
+          error: 'Estado inválido',
+          estadosPermitidos: estadosValidos
+        });
+      }
+
       // Verificar que el estado es diferente al actual
       if (mesa.estado === estado) {
         return res.status(409).json({
@@ -245,7 +254,7 @@ const mesaController = {
 
       // Actualizar estado en BD
       const mesaActualizada = await prisma.mesa.update({
-        where: { id: mesaId },
+        where: { id: mesa.id },
         data: {
           estado,
           ...(motivo && { observaciones: motivo })
@@ -259,7 +268,7 @@ const mesaController = {
           estadoAnterior: mesa.estado,
           estadoNuevo: estado,
           motivo: motivo || null,
-          usuario: req.user.nombre
+          usuario: req.user?.nombre || 'Sistema'
         }
       });
     } catch (error) {
@@ -354,7 +363,7 @@ const mesaController = {
       }
 
       const mesaActualizada = await prisma.mesa.update({
-        where: { id: mesaId },
+        where: { id: mesa.id },
         data: datosActualizacion
       });
 
@@ -402,7 +411,7 @@ const mesaController = {
 
       // Eliminar la mesa
       await prisma.mesa.delete({
-        where: { id: mesaId }
+        where: { id: mesa.id }
       });
 
       res.json({
@@ -413,7 +422,7 @@ const mesaController = {
           capacidad: mesa.capacidad,
           ubicacion: mesa.ubicacion
         },
-        eliminadoPor: req.user.nombre
+        eliminadoPor: req.user?.nombre || 'Sistema'
       });
     } catch (error) {
       return mesaHelpers.respuestaError(res, error);
