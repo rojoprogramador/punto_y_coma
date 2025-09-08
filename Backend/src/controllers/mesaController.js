@@ -17,6 +17,85 @@ const { validationResult } = require('express-validator');
 
 const prisma = new PrismaClient();
 
+// Helper functions para evitar duplicación de código
+const mesaHelpers = {
+  // Validar y parsear ID de mesa
+  validarMesaId: (id) => {
+    const mesaId = parseInt(id);
+    if (isNaN(mesaId)) {
+      throw new Error('ID de mesa inválido');
+    }
+    return mesaId;
+  },
+
+  // Buscar mesa por ID con validaciones
+  buscarMesaPorId: async (id, includeRelations = false) => {
+    const mesaId = mesaHelpers.validarMesaId(id);
+    
+    const includeOptions = includeRelations ? {
+      pedidos: {
+        where: {
+          estado: {
+            in: ['PENDIENTE', 'EN_PREPARACION', 'LISTO']
+          }
+        }
+      },
+      reservas: {
+        where: {
+          estado: 'ACTIVA',
+          fechaReserva: {
+            gte: new Date()
+          }
+        }
+      }
+    } : undefined;
+
+    const mesa = await prisma.mesa.findUnique({
+      where: { id: mesaId },
+      ...(includeOptions && { include: includeOptions })
+    });
+
+    if (!mesa) {
+      throw new Error('Mesa no encontrada');
+    }
+
+    return mesa;
+  },
+
+  // Manejar errores de validación
+  manejarErroresValidacion: (req) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      const error = new Error('Datos de entrada inválidos');
+      error.details = errors.array();
+      error.statusCode = 400;
+      throw error;
+    }
+  },
+
+  // Respuesta de error estándar
+  respuestaError: (res, error) => {
+    console.error('Error en mesaController:', error);
+    
+    if (error.message === 'ID de mesa inválido') {
+      return res.status(400).json({ error: error.message });
+    }
+    
+    if (error.message === 'Mesa no encontrada') {
+      return res.status(404).json({ error: error.message });
+    }
+    
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        error: error.message,
+        ...(error.details && { details: error.details })
+      });
+    }
+    
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
 const mesaController = {
   // GET /api/mesas
   getMesas: async (req, res) => {
@@ -76,23 +155,7 @@ const mesaController = {
   asignarMesa: async (req, res) => {
     try {
       const { id } = req.params;
-      const mesaId = parseInt(id);
-      
-      if (isNaN(mesaId)) {
-        return res.status(400).json({
-          error: 'ID de mesa inválido'
-        });
-      }
-
-      const mesa = await prisma.mesa.findUnique({
-        where: { id: mesaId }
-      });
-
-      if (!mesa) {
-        return res.status(404).json({
-          error: 'Mesa no encontrada'
-        });
-      }
+      const mesa = await mesaHelpers.buscarMesaPorId(id);
 
       if (mesa.estado !== 'DISPONIBLE') {
         return res.status(409).json({
@@ -102,7 +165,7 @@ const mesaController = {
       }
 
       const mesaActualizada = await prisma.mesa.update({
-        where: { id: mesaId },
+        where: { id: mesa.id },
         data: {
           estado: 'OCUPADA'
         }
@@ -113,8 +176,7 @@ const mesaController = {
         mesa: mesaActualizada
       });
     } catch (error) {
-      console.error('Error en asignarMesa:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      return mesaHelpers.respuestaError(res, error);
     }
   },
 
@@ -122,23 +184,7 @@ const mesaController = {
   liberarMesa: async (req, res) => {
     try {
       const { id } = req.params;
-      const mesaId = parseInt(id);
-      
-      if (isNaN(mesaId)) {
-        return res.status(400).json({
-          error: 'ID de mesa inválido'
-        });
-      }
-
-      const mesa = await prisma.mesa.findUnique({
-        where: { id: mesaId }
-      });
-
-      if (!mesa) {
-        return res.status(404).json({
-          error: 'Mesa no encontrada'
-        });
-      }
+      const mesa = await mesaHelpers.buscarMesaPorId(id);
 
       if (mesa.estado !== 'OCUPADA') {
         return res.status(409).json({
@@ -148,7 +194,7 @@ const mesaController = {
       }
 
       const mesaActualizada = await prisma.mesa.update({
-        where: { id: mesaId },
+        where: { id: mesa.id },
         data: {
           estado: 'DISPONIBLE'
         }
@@ -159,28 +205,65 @@ const mesaController = {
         mesa: mesaActualizada
       });
     } catch (error) {
-      console.error('Error en liberarMesa:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      return mesaHelpers.respuestaError(res, error);
     }
   },
 
   // PUT /api/mesas/:id/estado
   cambiarEstadoMesa: async (req, res) => {
     try {
-      // TODO: Implementar cambio de estado
-      // 1. Validar nuevo estado
-      // 2. Verificar permisos para el cambio
-      // 3. Actualizar estado en BD
-      // 4. Retornar mesa actualizada
+      mesaHelpers.manejarErroresValidacion(req);
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Cambiar estado mesa endpoint pendiente de implementación',
-        developer: 'Desarrollador 2 - rama: feature/mesas'
+      const { id } = req.params;
+      const { estado, motivo } = req.body;
+      const mesa = await mesaHelpers.buscarMesaPorId(id);
+
+      // Verificar que el estado es diferente al actual
+      if (mesa.estado === estado) {
+        return res.status(409).json({
+          error: 'La mesa ya tiene ese estado',
+          estadoActual: mesa.estado
+        });
+      }
+
+      // Validar transiciones de estado permitidas
+      const transicionesPermitidas = {
+        'DISPONIBLE': ['OCUPADA', 'RESERVADA', 'MANTENIMIENTO'],
+        'OCUPADA': ['DISPONIBLE', 'MANTENIMIENTO'],
+        'RESERVADA': ['DISPONIBLE', 'OCUPADA', 'MANTENIMIENTO'],
+        'MANTENIMIENTO': ['DISPONIBLE']
+      };
+
+      if (!transicionesPermitidas[mesa.estado]?.includes(estado)) {
+        return res.status(409).json({
+          error: 'Transición de estado no permitida',
+          estadoActual: mesa.estado,
+          estadoSolicitado: estado,
+          transicionesPermitidas: transicionesPermitidas[mesa.estado]
+        });
+      }
+
+      // Actualizar estado en BD
+      const mesaActualizada = await prisma.mesa.update({
+        where: { id: mesaId },
+        data: {
+          estado,
+          ...(motivo && { observaciones: motivo })
+        }
+      });
+
+      res.json({
+        message: 'Estado de mesa actualizado exitosamente',
+        mesa: mesaActualizada,
+        cambio: {
+          estadoAnterior: mesa.estado,
+          estadoNuevo: estado,
+          motivo: motivo || null,
+          usuario: req.user.nombre
+        }
       });
     } catch (error) {
-      console.error('Error en cambiarEstadoMesa:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      return mesaHelpers.respuestaError(res, error);
     }
   },
 
@@ -188,44 +271,21 @@ const mesaController = {
   getMesaById: async (req, res) => {
     try {
       const { id } = req.params;
-      const mesaId = parseInt(id);
-      
-      if (isNaN(mesaId)) {
-        return res.status(400).json({
-          error: 'ID de mesa inválido'
-        });
-      }
-
-      const mesa = await prisma.mesa.findUnique({
-        where: { id: mesaId }
-      });
-
-      if (!mesa) {
-        return res.status(404).json({
-          error: 'Mesa no encontrada'
-        });
-      }
+      const mesa = await mesaHelpers.buscarMesaPorId(id);
 
       res.json({
         message: 'Mesa obtenida exitosamente',
         mesa
       });
     } catch (error) {
-      console.error('Error en getMesaById:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      return mesaHelpers.respuestaError(res, error);
     }
   },
 
   // POST /api/mesas (solo admin)
   crearMesa: async (req, res) => {
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          error: 'Datos de entrada inválidos',
-          details: errors.array()
-        });
-      }
+      mesaHelpers.manejarErroresValidacion(req);
 
       const { numero, capacidad, ubicacion } = req.body;
 
@@ -254,48 +314,109 @@ const mesaController = {
         mesa: nuevaMesa
       });
     } catch (error) {
-      console.error('Error en crearMesa:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      return mesaHelpers.respuestaError(res, error);
     }
   },
 
   // PUT /api/mesas/:id (solo admin)
   actualizarMesa: async (req, res) => {
     try {
-      // TODO: Implementar actualizar mesa
-      // 1. Validar datos de entrada
-      // 2. Verificar permisos de admin
-      // 3. Actualizar mesa en BD
-      // 4. Retornar mesa actualizada
+      mesaHelpers.manejarErroresValidacion(req);
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Actualizar mesa endpoint pendiente de implementación',
-        developer: 'Desarrollador 2 - rama: feature/mesas'
+      const { id } = req.params;
+      const { numero, capacidad, ubicacion } = req.body;
+      const mesa = await mesaHelpers.buscarMesaPorId(id);
+
+      // Verificar si se está cambiando el número y ya existe otra mesa con ese número
+      if (numero && numero !== mesa.numero) {
+        const mesaExistente = await prisma.mesa.findUnique({
+          where: { numero }
+        });
+
+        if (mesaExistente) {
+          return res.status(409).json({
+            error: 'Ya existe una mesa con ese número'
+          });
+        }
+      }
+
+      // Preparar datos para actualizar (solo campos proporcionados)
+      const datosActualizacion = {};
+      if (numero !== undefined) datosActualizacion.numero = numero;
+      if (capacidad !== undefined) datosActualizacion.capacidad = capacidad;
+      if (ubicacion !== undefined) datosActualizacion.ubicacion = ubicacion;
+
+      // Si no hay campos para actualizar
+      if (Object.keys(datosActualizacion).length === 0) {
+        return res.status(400).json({
+          error: 'No se proporcionaron campos para actualizar'
+        });
+      }
+
+      const mesaActualizada = await prisma.mesa.update({
+        where: { id: mesaId },
+        data: datosActualizacion
+      });
+
+      res.json({
+        message: 'Mesa actualizada exitosamente',
+        mesa: mesaActualizada,
+        cambios: datosActualizacion
       });
     } catch (error) {
-      console.error('Error en actualizarMesa:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      return mesaHelpers.respuestaError(res, error);
     }
   },
 
   // DELETE /api/mesas/:id (solo admin)
   eliminarMesa: async (req, res) => {
     try {
-      // TODO: Implementar eliminar mesa
-      // 1. Verificar permisos de admin
-      // 2. Verificar que la mesa no esté en uso
-      // 3. Eliminar mesa de BD
-      // 4. Retornar confirmación
+      mesaHelpers.manejarErroresValidacion(req);
       
-      res.status(501).json({
-        error: 'Not implemented',
-        message: 'Eliminar mesa endpoint pendiente de implementación',
-        developer: 'Desarrollador 2 - rama: feature/mesas'
+      const { id } = req.params;
+      const mesa = await mesaHelpers.buscarMesaPorId(id, true);
+
+      // Verificar que la mesa no esté en uso
+      if (mesa.estado === 'OCUPADA') {
+        return res.status(409).json({
+          error: 'No se puede eliminar una mesa ocupada',
+          estadoActual: mesa.estado
+        });
+      }
+
+      // Verificar que no tenga pedidos activos
+      if (mesa.pedidos && mesa.pedidos.length > 0) {
+        return res.status(409).json({
+          error: 'No se puede eliminar una mesa con pedidos activos',
+          pedidosActivos: mesa.pedidos.length
+        });
+      }
+
+      // Verificar que no tenga reservas futuras
+      if (mesa.reservas && mesa.reservas.length > 0) {
+        return res.status(409).json({
+          error: 'No se puede eliminar una mesa con reservas futuras',
+          reservasFuturas: mesa.reservas.length
+        });
+      }
+
+      // Eliminar la mesa
+      await prisma.mesa.delete({
+        where: { id: mesaId }
+      });
+
+      res.json({
+        message: 'Mesa eliminada exitosamente',
+        mesaEliminada: {
+          id: mesa.id,
+          numero: mesa.numero,
+          capacidad: mesa.capacidad,
+          ubicacion: mesa.ubicacion
+        },
+        eliminadoPor: req.user.nombre
       });
     } catch (error) {
-      console.error('Error en eliminarMesa:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      return mesaHelpers.respuestaError(res, error);
     }
   }
 };
