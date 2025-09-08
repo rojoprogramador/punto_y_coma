@@ -194,15 +194,152 @@ const crearRespuestaPaginada = (data, total, page, limit) => {
   };
 };
 
-// TODO: Funciones adicionales que podrían ser útiles:
-// - encriptarDatos: Para datos sensibles
-// - generarHash: Para verificación de integridad
-// - validarNIF: Validar NIF/CIF español
-// - convertirFechaUTC: Manejar zonas horarias
-// - formatearDireccion: Formatear direcciones postales
-// - calcularDistancia: Entre dos direcciones
-// - generarSlug: Para URLs amigables
-// - comprimirImagen: Optimizar imágenes subidas
+/**
+ * Encriptar datos sensibles usando crypto
+ * @param {String} texto - Texto a encriptar
+ * @param {String} clave - Clave de encriptación (opcional)
+ * @returns {String} - Texto encriptado
+ */
+const encriptarDatos = (texto, clave = process.env.ENCRYPTION_KEY || 'clave-por-defecto') => {
+  const crypto = require('crypto');
+  const algorithm = 'aes-256-cbc';
+  const key = crypto.scryptSync(clave, 'salt', 32);
+  const iv = crypto.randomBytes(16);
+  
+  const cipher = crypto.createCipher(algorithm, key);
+  let encrypted = cipher.update(texto, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  
+  return iv.toString('hex') + ':' + encrypted;
+};
+
+/**
+ * Generar hash para verificación de integridad
+ * @param {String} datos - Datos para generar hash
+ * @param {String} algoritmo - Algoritmo de hash (por defecto sha256)
+ * @returns {String} - Hash generado
+ */
+const generarHash = (datos, algoritmo = 'sha256') => {
+  const crypto = require('crypto');
+  return crypto.createHash(algoritmo).update(datos).digest('hex');
+};
+
+/**
+ * Validar NIF/CIF español
+ * @param {String} documento - NIF o CIF a validar
+ * @returns {Boolean} - true si es válido
+ */
+const validarNIF = (documento) => {
+  if (!documento) return false;
+  
+  const nif = documento.toUpperCase().replace(/\s/g, '');
+  
+  // Validar NIF (DNI)
+  const nifRegex = /^[0-9]{8}[TRWAGMYFPDXBNJZSQVHLCKE]$/;
+  if (nifRegex.test(nif)) {
+    const numero = nif.slice(0, 8);
+    const letra = nif.slice(8);
+    const letras = 'TRWAGMYFPDXBNJZSQVHLCKE';
+    return letras[numero % 23] === letra;
+  }
+  
+  // Validar CIF
+  const cifRegex = /^[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-J]$/;
+  if (cifRegex.test(nif)) {
+    return true; // Simplificado - validación completa requiere más lógica
+  }
+  
+  return false;
+};
+
+/**
+ * Convertir fecha a UTC manejando zonas horarias
+ * @param {Date|String} fecha - Fecha a convertir
+ * @param {String} zonaHoraria - Zona horaria (por defecto Europe/Madrid)
+ * @returns {Date} - Fecha en UTC
+ */
+const convertirFechaUTC = (fecha, zonaHoraria = 'Europe/Madrid') => {
+  const fechaObj = new Date(fecha);
+  
+  // Usar Intl.DateTimeFormat para manejar zonas horarias
+  const formatter = new Intl.DateTimeFormat('en', {
+    timeZone: zonaHoraria,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+  
+  const parts = formatter.formatToParts(fechaObj);
+  const utcDate = new Date(
+    `${parts.find(p => p.type === 'year').value}-${parts.find(p => p.type === 'month').value}-${parts.find(p => p.type === 'day').value}T${parts.find(p => p.type === 'hour').value}:${parts.find(p => p.type === 'minute').value}:${parts.find(p => p.type === 'second').value}Z`
+  );
+  
+  return utcDate;
+};
+
+/**
+ * Formatear dirección postal española
+ * @param {Object} direccion - Objeto con datos de dirección
+ * @returns {String} - Dirección formateada
+ */
+const formatearDireccion = (direccion) => {
+  const { calle, numero, piso, puerta, codigoPostal, ciudad, provincia } = direccion;
+  
+  let direccionFormateada = '';
+  
+  if (calle) direccionFormateada += calle;
+  if (numero) direccionFormateada += ` ${numero}`;
+  if (piso) direccionFormateada += `, ${piso}º`;
+  if (puerta) direccionFormateada += ` ${puerta}`;
+  if (codigoPostal || ciudad) direccionFormateada += '\n';
+  if (codigoPostal) direccionFormateada += `${codigoPostal} `;
+  if (ciudad) direccionFormateada += ciudad;
+  if (provincia && provincia !== ciudad) direccionFormateada += ` (${provincia})`;
+  
+  return direccionFormateada.trim();
+};
+
+/**
+ * Generar slug para URLs amigables
+ * @param {String} texto - Texto para convertir en slug
+ * @returns {String} - Slug generado
+ */
+const generarSlug = (texto) => {
+  if (!texto) return '';
+  
+  return texto
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remover acentos
+    .replace(/[^a-z0-9\s-]/g, '') // Remover caracteres especiales
+    .replace(/\s+/g, '-') // Espacios a guiones
+    .replace(/-+/g, '-') // Múltiples guiones a uno
+    .replace(/^-|-$/g, ''); // Remover guiones al inicio/final
+};
+
+/**
+ * Validar formato de código postal español
+ * @param {String} codigoPostal - Código postal a validar
+ * @returns {Boolean} - true si es válido
+ */
+const validarCodigoPostal = (codigoPostal) => {
+  const regex = /^[0-5][0-9]{4}$/;
+  return regex.test(codigoPostal);
+};
+
+/**
+ * Generar código QR para mesa (placeholder - requiere librería qrcode)
+ * @param {Number} numeroMesa - Número de mesa
+ * @param {String} baseUrl - URL base del restaurante
+ * @returns {String} - URL para generar QR
+ */
+const generarQRMesa = (numeroMesa, baseUrl = 'https://restaurant.com') => {
+  return `${baseUrl}/mesa/${numeroMesa}`;
+};
 
 module.exports = {
   generarNumeroPedido,
@@ -217,5 +354,14 @@ module.exports = {
   calcularTiempoTranscurrido,
   limpiarTextoParaBusqueda,
   calcularPaginacion,
-  crearRespuestaPaginada
+  crearRespuestaPaginada,
+  // Nuevas funciones implementadas
+  encriptarDatos,
+  generarHash,
+  validarNIF,
+  convertirFechaUTC,
+  formatearDireccion,
+  generarSlug,
+  validarCodigoPostal,
+  generarQRMesa
 };
