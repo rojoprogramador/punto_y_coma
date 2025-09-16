@@ -20,6 +20,25 @@ describe('Helpers Utils', () => {
     expect(res).toEqual({ subtotal: 25, impuestos: 2.5, total: 27.5 });
   });
 
+  test('calcularTotales con items vacíos retorna ceros', () => {
+    const res = helpers.calcularTotales([], 21);
+    expect(res).toEqual({ subtotal: 0, impuestos: 0, total: 0 });
+  });
+
+  test('calcularTotales con impuestoPorcentaje 0', () => {
+    const items = [ { precioUnitario: 10, cantidad: 1 } ];
+    const res = helpers.calcularTotales(items, 0);
+    expect(res).toEqual({ subtotal: 10, impuestos: 0, total: 10 });
+  });
+
+  test('calcularTotales con decimales redondea correctamente', () => {
+    const items = [ { precioUnitario: 1.333, cantidad: 3 } ];
+    const res = helpers.calcularTotales(items, 21);
+    expect(res.subtotal).toBeCloseTo(3.999, 2);
+    expect(res.impuestos).toBeCloseTo(0.84, 2);
+    expect(res.total).toBeCloseTo(4.84, 2);
+  });
+
   test('formatearFecha retorna string legible', () => {
     const fecha = new Date('2025-09-16T10:00:00Z');
     expect(helpers.formatearFecha(fecha)).toMatch(/\d{2}\/\d{2}\/\d{4}/);
