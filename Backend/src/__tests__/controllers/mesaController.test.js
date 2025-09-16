@@ -35,7 +35,7 @@ describe('Mesa Controller Tests', () => {
         nombre: 'Mesa Test User',
         email: 'mesa-test@example.com',
         password: hashedPassword,
-        rol: 'MESERO',
+  rol: 'ADMIN',
         activo: true
       }
     });
@@ -201,6 +201,148 @@ describe('Mesa Controller Tests', () => {
   });
 
   // PROTECTED ROUTES - Testing authentication requirement
+
+  describe('Flujos autenticados de negocio', () => {
+    let mesaLibre;
+    let mesaOcupada;
+    let mesaIdCreada;
+
+    beforeAll(async () => {
+      // Crear una mesa disponible y una ocupada para pruebas de negocio
+      mesaLibre = await prisma.mesa.create({
+        data: {
+          numero: 997,
+          capacidad: 3,
+          estado: 'DISPONIBLE',
+          ubicacion: 'VIP'
+        }
+      });
+      mesaOcupada = await prisma.mesa.create({
+        data: {
+          numero: 996,
+          capacidad: 2,
+          estado: 'OCUPADA',
+          ubicacion: 'Barra'
+        }
+      });
+    });
+
+    afterAll(async () => {
+      await prisma.mesa.deleteMany({ where: { numero: { in: [997, 996, 995] } } });
+    });
+
+    test('asignarMesa: debe asignar una mesa disponible', async () => {
+      const res = await request(app)
+        .post(`/api/mesas/${mesaLibre.id}/asignar`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.mesa.estado).toBe('OCUPADA');
+    });
+
+    test('asignarMesa: error si la mesa no está disponible', async () => {
+      const res = await request(app)
+        .post(`/api/mesas/${mesaOcupada.id}/asignar`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/no está disponible/i);
+    });
+
+    test('liberarMesa: debe liberar una mesa ocupada', async () => {
+      // Primero, asegurarse que la mesa está ocupada
+      await prisma.mesa.update({ where: { id: mesaOcupada.id }, data: { estado: 'OCUPADA' } });
+      const res = await request(app)
+        .post(`/api/mesas/${mesaOcupada.id}/liberar`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.mesa.estado).toBe('DISPONIBLE');
+    });
+
+    test('liberarMesa: error si la mesa no está ocupada', async () => {
+      // Forzar la mesa a estado DISPONIBLE antes de probar
+      await prisma.mesa.update({ where: { id: mesaLibre.id }, data: { estado: 'DISPONIBLE' } });
+      const res = await request(app)
+        .post(`/api/mesas/${mesaLibre.id}/liberar`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/no está ocupada/i);
+    });
+
+    test('cambiarEstadoMesa: transición válida', async () => {
+      const res = await request(app)
+        .put(`/api/mesas/${mesaLibre.id}/estado`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ estado: 'MANTENIMIENTO', motivo: 'Limpieza' });
+      expect(res.status).toBe(200);
+      expect(res.body.mesa.estado).toBe('MANTENIMIENTO');
+      expect(res.body.cambio.motivo).toBe('Limpieza');
+    });
+
+    test('cambiarEstadoMesa: transición no permitida', async () => {
+      // Intentar pasar de MANTENIMIENTO a OCUPADA (no permitido)
+      await prisma.mesa.update({ where: { id: mesaLibre.id }, data: { estado: 'MANTENIMIENTO' } });
+      const res = await request(app)
+        .put(`/api/mesas/${mesaLibre.id}/estado`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ estado: 'OCUPADA' });
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/no permitida/i);
+    });
+
+    test('crearMesa: debe crear una nueva mesa', async () => {
+      const res = await request(app)
+        .post('/api/mesas')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ numero: 995, capacidad: 5, ubicacion: 'Patio' });
+      expect(res.status).toBe(201);
+      expect(res.body.mesa.numero).toBe(995);
+      mesaIdCreada = res.body.mesa.id;
+    });
+
+    test('crearMesa: error si el número ya existe', async () => {
+      const res = await request(app)
+        .post('/api/mesas')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ numero: 995, capacidad: 2, ubicacion: 'Otro' });
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/ya existe una mesa/i);
+    });
+
+    test('actualizarMesa: debe actualizar datos de la mesa', async () => {
+      const res = await request(app)
+        .put(`/api/mesas/${mesaIdCreada}`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ capacidad: 10 });
+      expect(res.status).toBe(200);
+      expect(res.body.mesa.capacidad).toBe(10);
+    });
+
+    test('actualizarMesa: error si no hay campos', async () => {
+      const res = await request(app)
+        .put(`/api/mesas/${mesaIdCreada}`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({});
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/no se proporcionaron campos/i);
+    });
+
+    test('eliminarMesa: debe eliminar la mesa creada', async () => {
+      const res = await request(app)
+        .delete(`/api/mesas/${mesaIdCreada}`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.mesaEliminada.numero).toBe(995);
+    });
+
+    test('eliminarMesa: error si la mesa está ocupada', async () => {
+      // Asegurarse que la mesa está ocupada
+      await prisma.mesa.update({ where: { id: mesaOcupada.id }, data: { estado: 'OCUPADA' } });
+      const res = await request(app)
+        .delete(`/api/mesas/${mesaOcupada.id}`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/no se puede eliminar una mesa ocupada/i);
+    });
+  });
   describe('Protected Routes - Authentication Required', () => {
     describe('POST /api/mesas/:id/asignar', () => {
       test('should require authentication', async () => {

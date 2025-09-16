@@ -235,8 +235,7 @@ const mesaController = {
       const mesaActualizada = await prisma.mesa.update({
         where: { id: mesa.id },
         data: {
-          estado,
-          ...(motivo && { observaciones: motivo })
+          estado
         }
       });
       res.json({
