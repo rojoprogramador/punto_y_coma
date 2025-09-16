@@ -159,9 +159,11 @@ const limpiarTextoParaBusqueda = (texto) => {
  * @returns {Object} - { skip, take }
  */
 const calcularPaginacion = (page = 1, limit = 10) => {
-  const pageNum = Math.max(1, parseInt(page));
-  const limitNum = Math.min(Math.max(1, parseInt(limit)), 100);
-  
+  let pageNum = parseInt(page);
+  let limitNum = parseInt(limit);
+  if (isNaN(pageNum) || pageNum < 1) pageNum = 1;
+  if (isNaN(limitNum) || limitNum < 1) limitNum = 1;
+  if (limitNum > 100) limitNum = 100;
   return {
     skip: (pageNum - 1) * limitNum,
     take: limitNum

@@ -1,3 +1,52 @@
+  test('validarNIF retorna false si documento es falsy', () => {
+    expect(helpers.validarNIF()).toBe(false);
+    expect(helpers.validarNIF(null)).toBe(false);
+    expect(helpers.validarNIF('')).toBe(false);
+  });
+
+  describe('formatearDireccion cubre todas las ramas', () => {
+    it('devuelve string vacío si no hay datos', () => {
+      expect(helpers.formatearDireccion({})).toBe('');
+    });
+    it('devuelve solo calle', () => {
+      expect(helpers.formatearDireccion({ calle: 'Calle' })).toBe('Calle');
+    });
+    it('devuelve calle y número', () => {
+      expect(helpers.formatearDireccion({ calle: 'Calle', numero: 5 })).toBe('Calle 5');
+    });
+    it('devuelve piso y puerta', () => {
+      expect(helpers.formatearDireccion({ piso: 2, puerta: 'B' })).toContain('2º B');
+    });
+    it('devuelve código postal y ciudad', () => {
+      expect(helpers.formatearDireccion({ codigoPostal: '28001', ciudad: 'Madrid' })).toContain('28001 Madrid');
+    });
+    it('devuelve provincia si es distinta de ciudad', () => {
+      expect(helpers.formatearDireccion({ ciudad: 'Madrid', provincia: 'Madrid' })).not.toContain('(');
+      expect(helpers.formatearDireccion({ ciudad: 'Madrid', provincia: 'España' })).toContain('(España)');
+    });
+  });
+  test('calcularTiempoTranscurrido retorna minutos si < 60', () => {
+    const hace30min = new Date(Date.now() - 30 * 60 * 1000);
+    expect(helpers.calcularTiempoTranscurrido(hace30min)).toMatch(/30 min/);
+  });
+
+  test('limpiarTextoParaBusqueda retorna vacío si texto falsy', () => {
+    expect(helpers.limpiarTextoParaBusqueda()).toBe('');
+    expect(helpers.limpiarTextoParaBusqueda(null)).toBe('');
+    expect(helpers.limpiarTextoParaBusqueda('')).toBe('');
+  });
+
+  test('calcularPaginacion usa valores por defecto y límites', () => {
+    expect(helpers.calcularPaginacion()).toEqual({ skip: 0, take: 10 });
+    expect(helpers.calcularPaginacion(-5, 200)).toEqual({ skip: 0, take: 100 });
+    expect(helpers.calcularPaginacion('abc', 'xyz')).toEqual({ skip: 0, take: 1 });
+  });
+
+  test('encriptarDatos usa clave por defecto si no se pasa', () => {
+    const enc = helpers.encriptarDatos('dato');
+    expect(typeof enc).toBe('string');
+    expect(enc.length).toBeGreaterThan(10);
+  });
 const helpers = require('../../utils/helpers');
 
 describe('Helpers Utils', () => {
@@ -42,6 +91,12 @@ describe('Helpers Utils', () => {
   test('formatearFecha retorna string legible', () => {
     const fecha = new Date('2025-09-16T10:00:00Z');
     expect(helpers.formatearFecha(fecha)).toMatch(/\d{2}\/\d{2}\/\d{4}/);
+  });
+
+  test('formatearFecha retorna vacío si no hay fecha', () => {
+    expect(helpers.formatearFecha()).toBe('');
+    expect(helpers.formatearFecha(null)).toBe('');
+    expect(helpers.formatearFecha('')).toBe('');
   });
 
   test('formatearPrecio retorna string con moneda', () => {
