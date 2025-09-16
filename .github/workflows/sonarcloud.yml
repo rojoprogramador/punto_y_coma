@@ -54,9 +54,33 @@ jobs:
         run: npm install
         working-directory: ./Backend
 
-      - name: Run tests
-        run: npm test
+      - name: Set up test environment
+        run: |
+          echo "DATABASE_URL=\"file:./test.db\"" > .env.test
+          echo "JWT_SECRET=\"test-secret-for-ci\"" >> .env.test
+          echo "NODE_ENV=test" >> .env.test
         working-directory: ./Backend
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+        working-directory: ./Backend
+
+      - name: Set up test database
+        run: |
+          # Use the pre-built SQLite schema
+          npx prisma generate --schema=./prisma/schema.sqlite.prisma
+          npx prisma db push --force-reset --schema=./prisma/schema.sqlite.prisma
+        working-directory: ./Backend
+        env:
+          DATABASE_URL: "file:./test.db"
+
+      - name: Run tests
+        run: npm run test:ci
+        working-directory: ./Backend
+        env:
+          DATABASE_URL: "file:./test.db"
+          JWT_SECRET: "test-secret-for-ci"
+          NODE_ENV: test
       - name: Analyze with SonarCloud
 
         # You can pin the exact commit or the version.
