@@ -15,6 +15,13 @@ const verificarConflictoReserva = async (mesaId, fechaCompleta, horaCompleta) =>
   });
 };
 
+// Función auxiliar para crear fecha y hora consistente
+const crearFechaHora = (fechaReserva, horaReserva) => {
+  const fechaCompleta = new Date(fechaReserva);
+  const horaCompleta = new Date(`${fechaReserva}T${horaReserva}:00`);
+  return { fechaCompleta, horaCompleta };
+};
+
 const reservaController = {
   // POST /api/reservas
   crearReserva: async (req, res) => {
@@ -42,8 +49,7 @@ const reservaController = {
       const usuarioId = req.user.id;
 
       // Crear fecha y hora completa para la reserva
-      const fechaCompleta = new Date(fechaReserva);
-      const horaCompleta = new Date(`${fechaReserva}T${horaReserva}:00`);
+      const { fechaCompleta, horaCompleta } = crearFechaHora(fechaReserva, horaReserva);
 
       // Si se especifica mesa preferida, verificar conflicto primero
       if (mesaPreferida) {
@@ -274,9 +280,8 @@ const reservaController = {
       
       if (horaReserva) {
         const fechaBase = datosActualizacion.fechaReserva || reservaExistente.fechaReserva;
-        const [horas, minutos] = horaReserva.split(':');
-        const horaCompleta = new Date(fechaBase);
-        horaCompleta.setHours(parseInt(horas), parseInt(minutos), 0, 0);
+        const fechaBaseString = fechaBase.toISOString().slice(0, 10);
+        const { horaCompleta } = crearFechaHora(fechaBaseString, horaReserva);
         datosActualizacion.horaReserva = horaCompleta;
       }
       
@@ -450,8 +455,7 @@ const reservaController = {
       }
 
       // Crear fecha y hora completa para verificación
-      const fechaCompleta = new Date(fechaReserva);
-      const horaCompleta = new Date(`${fechaReserva}T${horaReserva}:00`);
+      const { fechaCompleta, horaCompleta } = crearFechaHora(fechaReserva, horaReserva);
 
       // Verificar conflictos de horario
       const mesasLibres = [];
