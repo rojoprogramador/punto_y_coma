@@ -1,5 +1,7 @@
+
 const { PrismaClient } = require('@prisma/client');
 const { validationResult } = require('express-validator');
+const helpers = require('../utils/helpers');
 
 const prisma = new PrismaClient();
 
@@ -35,17 +37,7 @@ const validarErrores = (req, res) => {
   return true;
 };
 
-// Función auxiliar para validar y parsear ID
-const validarId = (id, res, fieldName = 'reserva') => {
-  const parsedId = parseInt(id);
-  if (isNaN(parsedId) || parsedId < 1) {
-    res.status(400).json({
-      error: `ID de ${fieldName} inválido`
-    });
-    return null;
-  }
-  return parsedId;
-};
+// Se usa helpers.validarId
 
 // Función auxiliar para formatear reserva con hora string
 const formatearReserva = (reserva) => {
@@ -61,11 +53,7 @@ const includeReservaCompleta = {
   usuario: { select: { nombre: true } }
 };
 
-// Función auxiliar para manejo de errores estándar
-const manejarError = (error, res, operacion) => {
-  console.error(`Error en ${operacion}:`, error);
-  res.status(500).json({ error: 'Error interno del servidor' });
-};
+// Se usa helpers.manejarError
 
 const reservaController = {
   // POST /api/reservas
@@ -226,7 +214,7 @@ const reservaController = {
   getReservaById: async (req, res) => {
     try {
       const { id } = req.params;
-      const reservaId = validarId(id, res);
+    const reservaId = helpers.validarId(id, res, 'reserva');
       if (!reservaId) return;
 
       const reserva = await prisma.reservaEnc.findUnique({
@@ -252,7 +240,7 @@ const reservaController = {
         reserva: reservaFormateada
       });
     } catch (error) {
-      manejarError(error, res, 'getReservaById');
+  helpers.manejarError(error, res, 'getReservaById');
     }
   },
   actualizarReserva: async (req, res) => {
@@ -260,7 +248,7 @@ const reservaController = {
       if (!validarErrores(req, res)) return;
 
       const { id } = req.params;
-      const reservaId = validarId(id, res);
+    const reservaId = helpers.validarId(id, res, 'reserva');
       if (!reservaId) return;
 
       const reservaExistente = await prisma.reservaEnc.findUnique({
@@ -313,7 +301,7 @@ const reservaController = {
         reserva: reservaFormateada
       });
     } catch (error) {
-      manejarError(error, res, 'actualizarReserva');
+  helpers.manejarError(error, res, 'actualizarReserva');
     }
   },
 
@@ -323,7 +311,7 @@ const reservaController = {
       if (!validarErrores(req, res)) return;
 
       const { id } = req.params;
-      const reservaId = validarId(id, res);
+    const reservaId = helpers.validarId(id, res, 'reserva');
       if (!reservaId) return;
 
       const { motivo } = req.body;
@@ -359,7 +347,7 @@ const reservaController = {
         reserva: reservaCancelada
       });
     } catch (error) {
-      manejarError(error, res, 'cancelarReserva');
+  helpers.manejarError(error, res, 'cancelarReserva');
     }
   },
 
@@ -367,7 +355,7 @@ const reservaController = {
   confirmarReserva: async (req, res) => {
     try {
       const { id } = req.params;
-      const reservaId = validarId(id, res);
+    const reservaId = helpers.validarId(id, res, 'reserva');
       if (!reservaId) return;
 
       const reserva = await prisma.reservaEnc.findUnique({
@@ -403,7 +391,7 @@ const reservaController = {
         reserva: reservaConfirmada
       });
     } catch (error) {
-      manejarError(error, res, 'confirmarReserva');
+  helpers.manejarError(error, res, 'confirmarReserva');
     }
   },
 
@@ -450,7 +438,7 @@ const reservaController = {
         hayDisponibilidad: mesasLibres.length > 0
       });
     } catch (error) {
-      manejarError(error, res, 'verificarDisponibilidad');
+  helpers.manejarError(error, res, 'verificarDisponibilidad');
     }
   },
 
@@ -503,7 +491,7 @@ const reservaController = {
         estadisticas
       });
     } catch (error) {
-      manejarError(error, res, 'getReservasHoy');
+  helpers.manejarError(error, res, 'getReservasHoy');
     }
   },
 
@@ -511,7 +499,7 @@ const reservaController = {
   completarReserva: async (req, res) => {
     try {
       const { id } = req.params;
-      const reservaId = validarId(id, res);
+    const reservaId = helpers.validarId(id, res, 'reserva');
       if (!reservaId) return;
 
       const reserva = await prisma.reservaEnc.findUnique({
@@ -547,7 +535,7 @@ const reservaController = {
         reserva: reservaCompletada
       });
     } catch (error) {
-      manejarError(error, res, 'completarReserva');
+  helpers.manejarError(error, res, 'completarReserva');
     }
   }
 };
