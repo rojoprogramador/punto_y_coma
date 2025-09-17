@@ -451,9 +451,7 @@ const reservaController = {
 
       // Crear fecha y hora completa para verificación
       const fechaCompleta = new Date(fechaReserva);
-      const [horas, minutos] = horaReserva.split(':');
-      const horaCompleta = new Date(fechaCompleta);
-      horaCompleta.setHours(parseInt(horas), parseInt(minutos), 0, 0);
+      const horaCompleta = new Date(`${fechaReserva}T${horaReserva}:00`);
 
       // Verificar conflictos de horario
       const mesasLibres = [];
