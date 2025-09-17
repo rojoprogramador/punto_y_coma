@@ -7,6 +7,7 @@ const router = express.Router();
 
 // GET /api/reservas - Obtener lista de reservas
 router.get('/', [
+  authMiddleware.verifyToken,
   query('fechaDesde')
     .optional()
     .isDate()
@@ -39,13 +40,13 @@ router.get('/', [
 
 // GET /api/reservas/hoy - Reservas del día actual
 router.get('/hoy', [
-  // Comentado temporalmente para pruebas - descomentar cuando tengas autenticación
-  // authMiddleware.verifyToken,
-  // authMiddleware.requireMeseroOrAdmin()
+  authMiddleware.verifyToken,
+  authMiddleware.requireMeseroOrAdmin()
 ], reservaController.getReservasHoy);
 
 // GET /api/reservas/:id - Obtener reserva por ID
 router.get('/:id', [
+  authMiddleware.verifyToken,
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID debe ser un número entero válido')
@@ -53,6 +54,7 @@ router.get('/:id', [
 
 // POST /api/reservas - Crear nueva reserva
 router.post('/', [
+  authMiddleware.verifyToken,
   body('fechaReserva')
     .isDate()
     .withMessage('Fecha de reserva debe ser válida')
@@ -102,6 +104,7 @@ router.post('/', [
 
 // POST /api/reservas/verificar-disponibilidad - Verificar disponibilidad
 router.post('/verificar-disponibilidad', [
+  authMiddleware.verifyToken,
   body('fechaReserva')
     .isDate()
     .withMessage('Fecha de reserva debe ser válida')
@@ -121,6 +124,7 @@ router.post('/verificar-disponibilidad', [
 
 // PUT /api/reservas/:id - Actualizar reserva existente
 router.put('/:id', [
+  authMiddleware.verifyToken,
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID debe ser un número entero válido'),
@@ -156,9 +160,8 @@ router.put('/:id', [
 
 // PUT /api/reservas/:id/confirmar - Confirmar asistencia
 router.put('/:id/confirmar', [
-  // Comentado temporalmente para pruebas - descomentar cuando tengas autenticación
-  // authMiddleware.verifyToken,
-  // authMiddleware.requireMeseroOrAdmin(),
+  authMiddleware.verifyToken,
+  authMiddleware.requireMeseroOrAdmin(),
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID debe ser un número entero válido')
@@ -166,6 +169,7 @@ router.put('/:id/confirmar', [
 
 // PUT /api/reservas/:id/cancelar - Cancelar reserva
 router.put('/:id/cancelar', [
+  authMiddleware.verifyToken,
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID debe ser un número entero válido'),
@@ -178,9 +182,8 @@ router.put('/:id/cancelar', [
 
 // PUT /api/reservas/:id/completar - Marcar reserva como completada
 router.put('/:id/completar', [
-  // Comentado temporalmente para pruebas - descomentar cuando tengas autenticación
-  // authMiddleware.verifyToken,
-  // authMiddleware.requireMeseroOrAdmin(),
+  authMiddleware.verifyToken,
+  authMiddleware.requireMeseroOrAdmin(),
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID debe ser un número entero válido')

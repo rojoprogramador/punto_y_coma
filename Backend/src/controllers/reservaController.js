@@ -15,17 +15,41 @@ const reservaController = {
         });
       }
 
-      const { 
-        fechaReserva, 
-        horaReserva, 
-        numeroPersonas, 
-        nombreCliente, 
-        telefonoCliente, 
-        emailCliente, 
-        observaciones, 
-        mesaPreferida,
-        usuarioId = 1 // Valor por defecto, ajustar según tu lógica de autenticación
+      const {
+        fechaReserva,
+        horaReserva,
+        numeroPersonas,
+        nombreCliente,
+        telefonoCliente,
+        emailCliente,
+        observaciones,
+        mesaPreferida
       } = req.body;
+
+      // Usar el usuarioId del token autenticado
+      const usuarioId = req.user.id;
+
+      // Crear fecha y hora completa para la reserva
+      const fechaCompleta = new Date(fechaReserva);
+      const horaCompleta = new Date(`${fechaReserva}T${horaReserva}:00`);
+
+      // Si se especifica mesa preferida, verificar conflicto primero
+      if (mesaPreferida) {
+        const conflictoReserva = await prisma.reservaEnc.findFirst({
+          where: {
+            mesaId: mesaPreferida,
+            fechaReserva: fechaCompleta,
+            horaReserva: horaCompleta,
+            estado: { in: ['ACTIVA', 'CONFIRMADA'] }
+          }
+        });
+
+        if (conflictoReserva) {
+          return res.status(409).json({
+            error: 'La mesa ya está reservada para esa fecha y hora'
+          });
+        }
+      }
 
       // Buscar mesa disponible con capacidad adecuada
       const mesaDisponible = await prisma.mesa.findFirst({
@@ -43,26 +67,22 @@ const reservaController = {
         });
       }
 
-      // Crear fecha y hora completa para la reserva
-      const fechaCompleta = new Date(fechaReserva);
-      const [horas, minutos] = horaReserva.split(':');
-      const horaCompleta = new Date(fechaCompleta);
-      horaCompleta.setHours(parseInt(horas), parseInt(minutos), 0, 0);
-
-      // Verificar que no haya conflicto de horario
-      const conflictoReserva = await prisma.reservaEnc.findFirst({
-        where: {
-          mesaId: mesaDisponible.id,
-          fechaReserva: fechaCompleta,
-          horaReserva: horaCompleta,
-          estado: { in: ['ACTIVA', 'CONFIRMADA'] }
-        }
-      });
-
-      if (conflictoReserva) {
-        return res.status(409).json({
-          error: 'La mesa ya está reservada para esa fecha y hora'
+      // Verificar conflicto para la mesa seleccionada (si no se hizo antes)
+      if (!mesaPreferida) {
+        const conflictoReserva = await prisma.reservaEnc.findFirst({
+          where: {
+            mesaId: mesaDisponible.id,
+            fechaReserva: fechaCompleta,
+            horaReserva: horaCompleta,
+            estado: { in: ['ACTIVA', 'CONFIRMADA'] }
+          }
         });
+
+        if (conflictoReserva) {
+          return res.status(409).json({
+            error: 'La mesa ya está reservada para esa fecha y hora'
+          });
+        }
       }
 
       const nuevaReserva = await prisma.reservaEnc.create({
@@ -91,6 +111,19 @@ const reservaController = {
         reserva: nuevaReserva
       });
     } catch (error) {
+      if (error.code === 'P2003') {
+        // Foreign key violation: mesa o usuario no existe
+        return res.status(404).json({ error: 'Mesa o usuario no encontrado' });
+      }
+      if (error.code === 'P2002' || error.code === 'P2004') {
+        // Unique constraint failed: conflicto de reserva
+        return res.status(409).json({ error: 'Conflicto de reserva' });
+      }
+      if (error.message && error.message.includes('La mesa ya está reservada')) {
+        // Conflicto de horario detectado manualmente
+        return res.status(409).json({ error: 'La mesa ya está reservada para esa fecha y hora' });
+      }
+      // Otros errores
       console.error('Error en crearReserva:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
     }
@@ -100,9 +133,7 @@ const reservaController = {
   getReservas: async (req, res) => {
     try {
       const { fechaDesde, fechaHasta, estado, mesa, cliente, page = 1, limit = 10 } = req.query;
-      
       const whereClause = {};
-      
       if (fechaDesde && fechaHasta) {
         whereClause.fechaReserva = {
           gte: new Date(fechaDesde),
@@ -113,7 +144,6 @@ const reservaController = {
       } else if (fechaHasta) {
         whereClause.fechaReserva = { lte: new Date(fechaHasta) };
       }
-      
       if (estado) whereClause.estado = estado;
       if (mesa) whereClause.mesaId = parseInt(mesa);
       if (cliente) {
@@ -122,42 +152,40 @@ const reservaController = {
           mode: 'insensitive'
         };
       }
-
-      const skip = (parseInt(page) - 1) * parseInt(limit);
-
+      const pageNum = parseInt(page);
+      const limitNum = parseInt(limit);
+      if (isNaN(pageNum) || pageNum < 1 || isNaN(limitNum) || limitNum < 1) {
+        return res.status(400).json({ error: 'Parámetros de paginación inválidos' });
+      }
+      const skip = (pageNum - 1) * limitNum;
       const [reservas, total] = await Promise.all([
         prisma.reservaEnc.findMany({
           where: whereClause,
           include: {
             mesa: true,
-            usuario: { 
-              select: { nombre: true } 
-            }
+            usuario: { select: { nombre: true } }
           },
           orderBy: [
             { fechaReserva: 'desc' },
             { horaReserva: 'asc' }
           ],
           skip,
-          take: parseInt(limit)
+          take: limitNum
         }),
         prisma.reservaEnc.count({ where: whereClause })
       ]);
-
-      // Formatear las reservas para incluir la hora como string
       const reservasFormateadas = reservas.map(reserva => ({
         ...reserva,
-        horaReservaString: reserva.horaReserva.toTimeString().slice(0, 5) // HH:mm
+        horaReservaString: reserva.horaReserva.toTimeString().slice(0, 5)
       }));
-
       res.json({
         message: 'Reservas obtenidas exitosamente',
         reservas: reservasFormateadas,
+        total,
         pagination: {
-          total,
-          page: parseInt(page),
-          limit: parseInt(limit),
-          totalPages: Math.ceil(total / parseInt(limit))
+          page: pageNum,
+          limit: limitNum,
+          totalPages: Math.ceil(total / limitNum)
         }
       });
     } catch (error) {
@@ -166,13 +194,13 @@ const reservaController = {
     }
   },
 
+  // PUT /api/reservas/:id
   // GET /api/reservas/:id
   getReservaById: async (req, res) => {
     try {
       const { id } = req.params;
       const reservaId = parseInt(id);
-      
-      if (isNaN(reservaId)) {
+      if (isNaN(reservaId) || reservaId < 1) {
         return res.status(400).json({
           error: 'ID de reserva inválido'
         });
@@ -182,14 +210,8 @@ const reservaController = {
         where: { id: reservaId },
         include: {
           mesa: true,
-          usuario: { 
-            select: { nombre: true } 
-          },
-          detalles: {
-            include: {
-              articulo: true
-            }
-          }
+          usuario: { select: { nombre: true } },
+          detalles: { include: { articulo: true } }
         }
       });
 
@@ -214,8 +236,6 @@ const reservaController = {
       res.status(500).json({ error: 'Error interno del servidor' });
     }
   },
-
-  // PUT /api/reservas/:id
   actualizarReserva: async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -271,6 +291,7 @@ const reservaController = {
       if (emailCliente) datosActualizacion.emailCliente = emailCliente;
       if (observaciones) datosActualizacion.observaciones = observaciones;
 
+      // ...existing code...
       const reservaActualizada = await prisma.reservaEnc.update({
         where: { id: reservaId },
         data: datosActualizacion,
@@ -360,8 +381,8 @@ const reservaController = {
     try {
       const { id } = req.params;
       const reservaId = parseInt(id);
-      
-      if (isNaN(reservaId)) {
+
+      if (isNaN(reservaId) || reservaId < 1) {
         return res.status(400).json({
           error: 'ID de reserva inválido'
         });
@@ -473,6 +494,18 @@ const reservaController = {
   // GET /api/reservas/hoy
   getReservasHoy: async (req, res) => {
     try {
+      const { limit } = req.query;
+
+      // Validar parámetros si se proporcionan
+      if (limit !== undefined) {
+        const limitNum = parseInt(limit);
+        if (isNaN(limitNum) || limitNum < 1) {
+          return res.status(400).json({
+            error: 'Parámetro limit inválido'
+          });
+        }
+      }
+
       const hoy = new Date();
       hoy.setHours(0, 0, 0, 0);
       const manana = new Date(hoy);
@@ -525,8 +558,8 @@ const reservaController = {
     try {
       const { id } = req.params;
       const reservaId = parseInt(id);
-      
-      if (isNaN(reservaId)) {
+      // Validar que el id sea un entero positivo
+      if (isNaN(reservaId) || reservaId < 1) {
         return res.status(400).json({
           error: 'ID de reserva inválido'
         });
