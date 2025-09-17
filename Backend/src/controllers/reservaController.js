@@ -22,17 +22,56 @@ const crearFechaHora = (fechaReserva, horaReserva) => {
   return { fechaCompleta, horaCompleta };
 };
 
+// Función auxiliar para validar errores de express-validator
+const validarErrores = (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    res.status(400).json({
+      error: 'Datos de entrada inválidos',
+      details: errors.array()
+    });
+    return false;
+  }
+  return true;
+};
+
+// Función auxiliar para validar y parsear ID
+const validarId = (id, res, fieldName = 'reserva') => {
+  const parsedId = parseInt(id);
+  if (isNaN(parsedId) || parsedId < 1) {
+    res.status(400).json({
+      error: `ID de ${fieldName} inválido`
+    });
+    return null;
+  }
+  return parsedId;
+};
+
+// Función auxiliar para formatear reserva con hora string
+const formatearReserva = (reserva) => {
+  return {
+    ...reserva,
+    horaReservaString: reserva.horaReserva.toTimeString().slice(0, 5)
+  };
+};
+
+// Configuración estándar de includes para consultas de reserva
+const includeReservaCompleta = {
+  mesa: true,
+  usuario: { select: { nombre: true } }
+};
+
+// Función auxiliar para manejo de errores estándar
+const manejarError = (error, res, operacion) => {
+  console.error(`Error en ${operacion}:`, error);
+  res.status(500).json({ error: 'Error interno del servidor' });
+};
+
 const reservaController = {
   // POST /api/reservas
   crearReserva: async (req, res) => {
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          error: 'Datos de entrada inválidos',
-          details: errors.array()
-        });
-      }
+      if (!validarErrores(req, res)) return;
 
       const {
         fechaReserva,
@@ -100,12 +139,7 @@ const reservaController = {
           usuarioId,
           mesaId: mesaDisponible.id
         },
-        include: {
-          mesa: true,
-          usuario: {
-            select: { nombre: true }
-          }
-        }
+        include: includeReservaCompleta
       });
 
       res.status(201).json({
@@ -126,8 +160,7 @@ const reservaController = {
         return res.status(409).json({ error: 'La mesa ya está reservada para esa fecha y hora' });
       }
       // Otros errores
-      console.error('Error en crearReserva:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      manejarError(error, res, 'crearReserva');
     }
   },
 
@@ -162,10 +195,7 @@ const reservaController = {
       const [reservas, total] = await Promise.all([
         prisma.reservaEnc.findMany({
           where: whereClause,
-          include: {
-            mesa: true,
-            usuario: { select: { nombre: true } }
-          },
+          include: includeReservaCompleta,
           orderBy: [
             { fechaReserva: 'desc' },
             { horaReserva: 'asc' }
@@ -175,10 +205,7 @@ const reservaController = {
         }),
         prisma.reservaEnc.count({ where: whereClause })
       ]);
-      const reservasFormateadas = reservas.map(reserva => ({
-        ...reserva,
-        horaReservaString: reserva.horaReserva.toTimeString().slice(0, 5)
-      }));
+      const reservasFormateadas = reservas.map(formatearReserva);
       res.json({
         message: 'Reservas obtenidas exitosamente',
         reservas: reservasFormateadas,
@@ -190,8 +217,7 @@ const reservaController = {
         }
       });
     } catch (error) {
-      console.error('Error en getReservas:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      manejarError(error, res, 'getReservas');
     }
   },
 
@@ -200,12 +226,8 @@ const reservaController = {
   getReservaById: async (req, res) => {
     try {
       const { id } = req.params;
-      const reservaId = parseInt(id);
-      if (isNaN(reservaId) || reservaId < 1) {
-        return res.status(400).json({
-          error: 'ID de reserva inválido'
-        });
-      }
+      const reservaId = validarId(id, res);
+      if (!reservaId) return;
 
       const reserva = await prisma.reservaEnc.findUnique({
         where: { id: reservaId },
@@ -223,38 +245,23 @@ const reservaController = {
       }
 
       // Formatear la reserva para incluir la hora como string
-      const reservaFormateada = {
-        ...reserva,
-        horaReservaString: reserva.horaReserva.toTimeString().slice(0, 5)
-      };
+      const reservaFormateada = formatearReserva(reserva);
 
       res.json({
         message: 'Reserva obtenida exitosamente',
         reserva: reservaFormateada
       });
     } catch (error) {
-      console.error('Error en getReservaById:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      manejarError(error, res, 'getReservaById');
     }
   },
   actualizarReserva: async (req, res) => {
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          error: 'Datos de entrada inválidos',
-          details: errors.array()
-        });
-      }
+      if (!validarErrores(req, res)) return;
 
       const { id } = req.params;
-      const reservaId = parseInt(id);
-      
-      if (isNaN(reservaId)) {
-        return res.status(400).json({
-          error: 'ID de reserva inválido'
-        });
-      }
+      const reservaId = validarId(id, res);
+      if (!reservaId) return;
 
       const reservaExistente = await prisma.reservaEnc.findUnique({
         where: { id: reservaId }
@@ -295,50 +302,31 @@ const reservaController = {
       const reservaActualizada = await prisma.reservaEnc.update({
         where: { id: reservaId },
         data: datosActualizacion,
-        include: {
-          mesa: true,
-          usuario: {
-            select: { nombre: true }
-          }
-        }
+        include: includeReservaCompleta
       });
 
       // Formatear la reserva actualizada
-      const reservaFormateada = {
-        ...reservaActualizada,
-        horaReservaString: reservaActualizada.horaReserva.toTimeString().slice(0, 5)
-      };
+      const reservaFormateada = formatearReserva(reservaActualizada);
 
       res.json({
         message: 'Reserva actualizada exitosamente',
         reserva: reservaFormateada
       });
     } catch (error) {
-      console.error('Error en actualizarReserva:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      manejarError(error, res, 'actualizarReserva');
     }
   },
 
   // PUT /api/reservas/:id/cancelar
   cancelarReserva: async (req, res) => {
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          error: 'Datos de entrada inválidos',
-          details: errors.array()
-        });
-      }
+      if (!validarErrores(req, res)) return;
 
       const { id } = req.params;
-      const reservaId = parseInt(id);
+      const reservaId = validarId(id, res);
+      if (!reservaId) return;
+
       const { motivo } = req.body;
-      
-      if (isNaN(reservaId)) {
-        return res.status(400).json({
-          error: 'ID de reserva inválido'
-        });
-      }
 
       const reserva = await prisma.reservaEnc.findUnique({
         where: { id: reservaId }
@@ -371,8 +359,7 @@ const reservaController = {
         reserva: reservaCancelada
       });
     } catch (error) {
-      console.error('Error en cancelarReserva:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      manejarError(error, res, 'cancelarReserva');
     }
   },
 
@@ -380,13 +367,8 @@ const reservaController = {
   confirmarReserva: async (req, res) => {
     try {
       const { id } = req.params;
-      const reservaId = parseInt(id);
-
-      if (isNaN(reservaId) || reservaId < 1) {
-        return res.status(400).json({
-          error: 'ID de reserva inválido'
-        });
-      }
+      const reservaId = validarId(id, res);
+      if (!reservaId) return;
 
       const reserva = await prisma.reservaEnc.findUnique({
         where: { id: reservaId },
@@ -421,21 +403,14 @@ const reservaController = {
         reserva: reservaConfirmada
       });
     } catch (error) {
-      console.error('Error en confirmarReserva:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      manejarError(error, res, 'confirmarReserva');
     }
   },
 
   // POST /api/reservas/verificar-disponibilidad
   verificarDisponibilidad: async (req, res) => {
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          error: 'Datos de entrada inválidos',
-          details: errors.array()
-        });
-      }
+      if (!validarErrores(req, res)) return;
 
       const { fechaReserva, horaReserva, numeroPersonas } = req.body;
 
@@ -475,8 +450,7 @@ const reservaController = {
         hayDisponibilidad: mesasLibres.length > 0
       });
     } catch (error) {
-      console.error('Error en verificarDisponibilidad:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      manejarError(error, res, 'verificarDisponibilidad');
     }
   },
 
@@ -507,20 +481,12 @@ const reservaController = {
             lt: manana
           }
         },
-        include: {
-          mesa: true,
-          usuario: {
-            select: { nombre: true }
-          }
-        },
+        include: includeReservaCompleta,
         orderBy: { horaReserva: 'asc' }
       });
 
       // Formatear las reservas
-      const reservasFormateadas = reservasHoy.map(reserva => ({
-        ...reserva,
-        horaReservaString: reserva.horaReserva.toTimeString().slice(0, 5)
-      }));
+      const reservasFormateadas = reservasHoy.map(formatearReserva);
 
       const estadisticas = {
         total: reservasFormateadas.length,
@@ -537,8 +503,7 @@ const reservaController = {
         estadisticas
       });
     } catch (error) {
-      console.error('Error en getReservasHoy:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      manejarError(error, res, 'getReservasHoy');
     }
   },
 
@@ -546,13 +511,8 @@ const reservaController = {
   completarReserva: async (req, res) => {
     try {
       const { id } = req.params;
-      const reservaId = parseInt(id);
-      // Validar que el id sea un entero positivo
-      if (isNaN(reservaId) || reservaId < 1) {
-        return res.status(400).json({
-          error: 'ID de reserva inválido'
-        });
-      }
+      const reservaId = validarId(id, res);
+      if (!reservaId) return;
 
       const reserva = await prisma.reservaEnc.findUnique({
         where: { id: reservaId },
@@ -587,8 +547,7 @@ const reservaController = {
         reserva: reservaCompletada
       });
     } catch (error) {
-      console.error('Error en completarReserva:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      manejarError(error, res, 'completarReserva');
     }
   }
 };
