@@ -14,8 +14,8 @@ describe('Reserva Controller Tests', () => {
   let testReserva;
 
   beforeAll(async () => {
-    // Limpiar datos previos
-    await prisma.reservaEnc.deleteMany({ where: { nombreCliente: 'Reserva Test User' } });
+    // Limpiar datos previos con orden correcto (foreign keys)
+    await prisma.reservaEnc.deleteMany({}); // Limpiar todas las reservas primero
     await prisma.mesa.deleteMany({ where: { numero: { in: [9999, 9998] } } });
     await prisma.usuario.deleteMany({ where: { email: 'reserva-test@example.com' } });
 
@@ -54,7 +54,8 @@ describe('Reserva Controller Tests', () => {
   });
 
   afterAll(async () => {
-    await prisma.reservaEnc.deleteMany({ where: { nombreCliente: 'Reserva Test User' } });
+    // Limpiar reservas primero (foreign key constraints)
+    await prisma.reservaEnc.deleteMany({});
     await prisma.mesa.deleteMany({ where: { numero: { in: [9999, 9998] } } });
     await prisma.usuario.deleteMany({ where: { email: 'reserva-test@example.com' } });
     await prisma.$disconnect();
@@ -190,6 +191,86 @@ describe('Reserva Controller Tests', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .send({ ...baseReserva, mesaPreferida: 999999 });
       expect([404, 409, 500]).toContain(res.status);
+    });
+
+    test('debe manejar conflicto de reserva duplicada (P2002/P2004)', async () => {
+      const fechaFutura = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+      // Crear primera reserva
+      const primeraReserva = {
+        ...baseReserva,
+        fechaReserva: fechaFutura,
+        horaReserva: '21:00',
+        nombreCliente: 'Cliente Conflicto 1',
+        mesaPreferida: testMesa.id
+      };
+
+      await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(primeraReserva);
+
+      // Intentar crear reserva duplicada en la misma mesa, fecha y hora
+      const reservaDuplicada = {
+        ...baseReserva,
+        fechaReserva: fechaFutura,
+        horaReserva: '21:00',
+        nombreCliente: 'Cliente Conflicto 2',
+        mesaPreferida: testMesa.id
+      };
+
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(reservaDuplicada);
+
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty('error');
+      expect(res.body.error).toMatch(/reservada|conflicto/i);
+    });
+
+    test('debe manejar error de conflicto manual en catch block', async () => {
+      // Crear reserva inicial para ocupar la mesa
+      const fechaFutura = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+      await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          ...baseReserva,
+          fechaReserva: fechaFutura,
+          horaReserva: '22:00',
+          nombreCliente: 'Cliente Base',
+          mesaPreferida: testMesa.id
+        });
+
+      // Crear múltiples reservas simultáneas para forzar condición de carrera
+      // que pueda causar que el error se propague al catch block
+      const promesas = [];
+      for (let i = 0; i < 3; i++) {
+        const promesa = request(app)
+          .post(endpoint)
+          .set('Authorization', `Bearer ${authToken}`)
+          .send({
+            ...baseReserva,
+            fechaReserva: fechaFutura,
+            horaReserva: '22:00',
+            nombreCliente: `Cliente Race ${i}`,
+            mesaPreferida: testMesa.id
+          });
+        promesas.push(promesa);
+      }
+
+      const resultados = await Promise.all(promesas);
+
+      // Al menos una debería fallar con 409
+      const algunFallo = resultados.some(res => res.status === 409);
+      expect(algunFallo).toBe(true);
+
+      // Verificar que el error contiene el mensaje esperado
+      const respuestasError = resultados.filter(res => res.status === 409);
+      expect(respuestasError.length).toBeGreaterThan(0);
+      expect(respuestasError[0].body.error).toMatch(/reservada|conflicto/i);
     });
 
     test('debe crear reserva con datos válidos completos', async () => {
@@ -436,7 +517,13 @@ describe('Reserva Controller Tests', () => {
     });
 
     afterEach(async () => {
-      await prisma.reservaEnc.deleteMany({ where: { nombreCliente: { in: ['Reserva Test User', 'Reserva Actualizada'] } } });
+      await prisma.reservaEnc.deleteMany({
+        where: {
+          nombreCliente: {
+            in: ['Reserva Test User', 'Reserva Actualizada', 'Cliente Modificado', 'Cliente Completo']
+          }
+        }
+      });
     });
 
     test('debe actualizar una reserva ACTIVA', async () => {
@@ -490,6 +577,118 @@ describe('Reserva Controller Tests', () => {
         .send(updateData);
       expect(res.status).toBe(409);
       expect(res.body).toHaveProperty('error');
+    });
+
+    test('debe actualizar solo fechaReserva', async () => {
+      const nuevaFecha = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ fechaReserva: nuevaFecha });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.fechaReserva).toMatch(nuevaFecha);
+    });
+
+    test('debe actualizar solo horaReserva', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ horaReserva: '15:30' });
+      expect(res.status).toBe(200);
+      // Verificar que la hora fue actualizada (puede tener offset de timezone)
+      const horaReserva = new Date(res.body.reserva.horaReserva);
+      expect(horaReserva.getUTCHours()).toBe(20); // 15:30 + 5 horas UTC offset
+      expect(horaReserva.getUTCMinutes()).toBe(30);
+    });
+
+    test('debe actualizar fechaReserva y horaReserva juntas', async () => {
+      const nuevaFecha = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          fechaReserva: nuevaFecha,
+          horaReserva: '16:45'
+        });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.fechaReserva).toMatch(nuevaFecha);
+      const horaReserva = new Date(res.body.reserva.horaReserva);
+      expect(horaReserva.getUTCHours()).toBe(21); // 16:45 + 5 horas UTC offset
+      expect(horaReserva.getUTCMinutes()).toBe(45);
+    });
+
+    test('debe actualizar solo numeroPersonas', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ numeroPersonas: 6 });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.numeroPersonas).toBe(6);
+    });
+
+    test('debe actualizar solo nombreCliente', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ nombreCliente: 'Cliente Modificado' });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.nombreCliente).toBe('Cliente Modificado');
+    });
+
+    test('debe actualizar solo telefonoCliente', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ telefonoCliente: '123456789' });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.telefonoCliente).toBe('123456789');
+    });
+
+    test('debe actualizar solo emailCliente', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ emailCliente: 'nuevo@email.com' });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.emailCliente).toBe('nuevo@email.com');
+    });
+
+    test('debe actualizar solo observaciones', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ observaciones: 'Nueva observación' });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.observaciones).toBe('Nueva observación');
+    });
+
+    test('debe actualizar múltiples campos a la vez', async () => {
+      const nuevaFecha = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const datosCompletos = {
+        fechaReserva: nuevaFecha,
+        horaReserva: '18:30',
+        numeroPersonas: 8,
+        nombreCliente: 'Cliente Completo',
+        telefonoCliente: '987654321',
+        emailCliente: 'completo@test.com',
+        observaciones: 'Observaciones completas'
+      };
+
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(datosCompletos);
+
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.fechaReserva).toMatch(nuevaFecha);
+      const horaReserva = new Date(res.body.reserva.horaReserva);
+      expect(horaReserva.getUTCHours()).toBe(23); // 18:30 + 5 horas UTC offset
+      expect(horaReserva.getUTCMinutes()).toBe(30);
+      expect(res.body.reserva.numeroPersonas).toBe(8);
+      expect(res.body.reserva.nombreCliente).toBe('Cliente Completo');
+      expect(res.body.reserva.telefonoCliente).toBe('987654321');
+      expect(res.body.reserva.emailCliente).toBe('completo@test.com');
+      expect(res.body.reserva.observaciones).toBe('Observaciones completas');
     });
 
     test('debe requerir autenticación', async () => {
