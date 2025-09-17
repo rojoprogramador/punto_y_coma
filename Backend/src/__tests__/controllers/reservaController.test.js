@@ -93,6 +93,19 @@ describe('Reserva Controller Tests', () => {
       expect(res.body).toHaveProperty('error');
     });
 
+    test('debe rechazar fechas pasadas', async () => {
+      const fechaPasada = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10); // ayer
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ ...baseReserva, fechaReserva: fechaPasada });
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('error', 'Datos de entrada inválidos');
+      expect(res.body).toHaveProperty('details');
+      expect(Array.isArray(res.body.details)).toBe(true);
+      expect(res.body.details.some(detail => detail.msg === 'La fecha de reserva debe ser futura')).toBe(true);
+    });
+
     test('debe rechazar si no hay mesas disponibles', async () => {
       // Crear una mesa ocupada para simular no disponibilidad
       const mesaOcupada = await prisma.mesa.create({
