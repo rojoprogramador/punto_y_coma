@@ -3,6 +3,18 @@ const { validationResult } = require('express-validator');
 
 const prisma = new PrismaClient();
 
+// Función auxiliar para verificar conflictos de reserva
+const verificarConflictoReserva = async (mesaId, fechaCompleta, horaCompleta) => {
+  return await prisma.reservaEnc.findFirst({
+    where: {
+      mesaId,
+      fechaReserva: fechaCompleta,
+      horaReserva: horaCompleta,
+      estado: { in: ['ACTIVA', 'CONFIRMADA'] }
+    }
+  });
+};
+
 const reservaController = {
   // POST /api/reservas
   crearReserva: async (req, res) => {
@@ -35,15 +47,7 @@ const reservaController = {
 
       // Si se especifica mesa preferida, verificar conflicto primero
       if (mesaPreferida) {
-        const conflictoReserva = await prisma.reservaEnc.findFirst({
-          where: {
-            mesaId: mesaPreferida,
-            fechaReserva: fechaCompleta,
-            horaReserva: horaCompleta,
-            estado: { in: ['ACTIVA', 'CONFIRMADA'] }
-          }
-        });
-
+        const conflictoReserva = await verificarConflictoReserva(mesaPreferida, fechaCompleta, horaCompleta);
         if (conflictoReserva) {
           return res.status(409).json({
             error: 'La mesa ya está reservada para esa fecha y hora'
@@ -69,15 +73,7 @@ const reservaController = {
 
       // Verificar conflicto para la mesa seleccionada (si no se hizo antes)
       if (!mesaPreferida) {
-        const conflictoReserva = await prisma.reservaEnc.findFirst({
-          where: {
-            mesaId: mesaDisponible.id,
-            fechaReserva: fechaCompleta,
-            horaReserva: horaCompleta,
-            estado: { in: ['ACTIVA', 'CONFIRMADA'] }
-          }
-        });
-
+        const conflictoReserva = await verificarConflictoReserva(mesaDisponible.id, fechaCompleta, horaCompleta);
         if (conflictoReserva) {
           return res.status(409).json({
             error: 'La mesa ya está reservada para esa fecha y hora'
@@ -462,15 +458,7 @@ const reservaController = {
       // Verificar conflictos de horario
       const mesasLibres = [];
       for (const mesa of mesasDisponibles) {
-        const conflicto = await prisma.reservaEnc.findFirst({
-          where: {
-            mesaId: mesa.id,
-            fechaReserva: fechaCompleta,
-            horaReserva: horaCompleta,
-            estado: { in: ['ACTIVA', 'CONFIRMADA'] }
-          }
-        });
-
+        const conflicto = await verificarConflictoReserva(mesa.id, fechaCompleta, horaCompleta);
         if (!conflicto) {
           mesasLibres.push(mesa);
         }
