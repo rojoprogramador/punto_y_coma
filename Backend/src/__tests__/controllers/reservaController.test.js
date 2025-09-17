@@ -142,6 +142,39 @@ describe('Reserva Controller Tests', () => {
       expect(res.body).toHaveProperty('error');
     });
 
+    test('debe crear reserva sin mesa preferida cuando hay mesas disponibles', async () => {
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(baseReserva); // Sin mesaPreferida
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty('message', 'Reserva creada exitosamente');
+      expect(res.body).toHaveProperty('reserva');
+      expect(res.body.reserva.mesaId).toBe(testMesa.id); // Debería usar la mesa disponible
+    });
+
+    test('debe rechazar conflicto sin mesa preferida', async () => {
+      // Crear reserva previa en la mesa disponible
+      await prisma.reservaEnc.create({
+        data: {
+          ...baseReserva,
+          fechaReserva: new Date(baseReserva.fechaReserva),
+          horaReserva: new Date(`${baseReserva.fechaReserva}T${baseReserva.horaReserva}:00`),
+          numeroPersonas: 2,
+          nombreCliente: 'Conflicto',
+          usuarioId: testUser.id,
+          mesaId: testMesa.id,
+          estado: 'ACTIVA'
+        }
+      });
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(baseReserva); // Sin mesaPreferida
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty('error', 'La mesa ya está reservada para esa fecha y hora');
+    });
+
     test('debe requerir autenticación', async () => {
       const res = await request(app)
         .post(endpoint)
@@ -157,6 +190,24 @@ describe('Reserva Controller Tests', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .send({ ...baseReserva, mesaPreferida: 999999 });
       expect([404, 409, 500]).toContain(res.status);
+    });
+
+    test('debe crear reserva con datos válidos completos', async () => {
+      const reservaCompleta = {
+        ...baseReserva,
+        telefonoCliente: '123456789',
+        emailCliente: 'test@example.com',
+        observaciones: 'Reserva completa de prueba',
+        mesaPreferida: testMesa.id
+      };
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(reservaCompleta);
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty('reserva');
+      expect(res.body.reserva.telefonoCliente).toBe('123456789');
+      expect(res.body.reserva.emailCliente).toBe('test@example.com');
     });
     
     afterEach(async () => {
@@ -243,6 +294,50 @@ describe('Reserva Controller Tests', () => {
       const res = await request(app)
         .get(endpoint);
       expect([401, 403]).toContain(res.status);
+    });
+
+    test('debe filtrar por rango de fechas (fechaDesde y fechaHasta)', async () => {
+      const fechaDesde = new Date(Date.now() + 23 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const fechaHasta = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const res = await request(app)
+        .get(`${endpoint}?fechaDesde=${fechaDesde}&fechaHasta=${fechaHasta}`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('reservas');
+    });
+
+    test('debe filtrar solo por fechaDesde', async () => {
+      const fechaDesde = new Date(Date.now() + 23 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const res = await request(app)
+        .get(`${endpoint}?fechaDesde=${fechaDesde}`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('reservas');
+    });
+
+    test('debe filtrar solo por fechaHasta', async () => {
+      const fechaHasta = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const res = await request(app)
+        .get(`${endpoint}?fechaHasta=${fechaHasta}`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('reservas');
+    });
+
+    test('debe filtrar por mesa', async () => {
+      const res = await request(app)
+        .get(`${endpoint}?mesa=${testMesa.id}`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('reservas');
+    });
+
+    test('debe filtrar por cliente', async () => {
+      const res = await request(app)
+        .get(`${endpoint}?cliente=Reserva`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('reservas');
     });
 
     test('debe manejar error interno', async () => {

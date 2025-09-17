@@ -148,8 +148,7 @@ const reservaController = {
       if (mesa) whereClause.mesaId = parseInt(mesa);
       if (cliente) {
         whereClause.nombreCliente = {
-          contains: cliente,
-          mode: 'insensitive'
+          contains: cliente
         };
       }
       const pageNum = parseInt(page);
