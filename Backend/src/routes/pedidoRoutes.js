@@ -16,9 +16,7 @@ const express = require('express');
 const { body, param, query } = require('express-validator');
 const pedidoController = require('../controllers/pedidoController');
 
-// TODO: Descomentar cuando los middlewares estén implementados
-// const authMiddleware = require('../middleware/auth');
-// const roleMiddleware = require('../middleware/role');
+const authMiddleware = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -104,8 +102,7 @@ router.get('/:id', [
 // - observaciones: observaciones generales del pedido (opcional)
 // TODO: Requiere autenticación y rol MESERO o superior
 router.post('/', [
-  // TODO: authMiddleware.verifyToken,
-  // TODO: authMiddleware.requireRole(['MESERO', 'ADMIN']),
+  authMiddleware.verifyToken,
 
   // Validación del ID de mesa - requerido y debe ser válido
   body('mesaId')
@@ -151,8 +148,7 @@ router.post('/', [
 // - COCINERO: puede cambiar a EN_PREPARACION y LISTO
 // - ADMIN: puede cambiar a cualquier estado
 router.put('/:id/estado', [
-  // TODO: authMiddleware.verifyToken,
-  // TODO: Implementar lógica de permisos por rol
+  authMiddleware.verifyToken,
 
   // Validación del ID del pedido
   param('id')
@@ -180,8 +176,7 @@ router.put('/:id/estado', [
 // - observaciones: observaciones específicas del item (opcional)
 // Solo se puede agregar si el pedido está en estado PENDIENTE
 router.post('/:id/items', [
-  // TODO: authMiddleware.verifyToken,
-  // TODO: authMiddleware.requireRole(['MESERO', 'ADMIN']),
+  authMiddleware.verifyToken,
 
   // Validación del ID del pedido
   param('id')

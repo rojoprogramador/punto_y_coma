@@ -34,7 +34,7 @@ const validarErrores = (req, res) => {
 // Función auxiliar para validar ID
 const validarId = (id, res, fieldName = 'pedido') => {
   const parsedId = parseInt(id);
-  if (isNaN(parsedId) || parsedId < 1) {
+  if (isNaN(parsedId) || parsedId < 1 || parsedId > Number.MAX_SAFE_INTEGER) {
     if (res) {
       res.status(400).json({ error: `ID de ${fieldName} inválido` });
     }
@@ -319,14 +319,9 @@ const pedidoController = {
   getPedidoById: async (req, res) => {
     try {
       const { id } = req.params;
-      const pedidoId = parseInt(id);
+      const pedidoId = validarId(id, res, 'pedido');
 
-      // Validar que el ID sea un número válido
-      if (isNaN(pedidoId)) {
-        return res.status(400).json({
-          error: 'ID de pedido inválido'
-        });
-      }
+      if (!pedidoId) return;
 
       // Buscar pedido con todas las relaciones necesarias
       const pedido = await prisma.pedidoEnc.findUnique({
