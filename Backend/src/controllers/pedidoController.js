@@ -14,21 +14,71 @@
 
 const { PrismaClient } = require('@prisma/client');
 const { validationResult } = require('express-validator');
+const helpers = require('../utils/helpers');
 
 const prisma = new PrismaClient();
+
+// Función auxiliar para validar errores de express-validator
+const validarErrores = (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    res.status(400).json({
+      error: 'Datos de entrada inválidos',
+      details: errors.array()
+    });
+    return false;
+  }
+  return true;
+};
+
+// Función auxiliar para validar ID
+const validarId = (id, res, fieldName = 'pedido') => {
+  const parsedId = parseInt(id);
+  if (isNaN(parsedId) || parsedId < 1) {
+    if (res) {
+      res.status(400).json({ error: `ID de ${fieldName} inválido` });
+    }
+    return null;
+  }
+  return parsedId;
+};
+
+// Función auxiliar para obtener pedido por ID con validación
+const obtenerPedidoPorId = async (id, res, includeOptions = {}) => {
+  const pedidoId = validarId(id, res, 'pedido');
+  if (!pedidoId) return null;
+
+  const pedido = await prisma.pedidoEnc.findUnique({
+    where: { id: pedidoId },
+    include: includeOptions
+  });
+
+  if (!pedido) {
+    res.status(404).json({ error: 'Pedido no encontrado' });
+    return null;
+  }
+
+  return { pedido, pedidoId };
+};
+
+// Función auxiliar para recalcular total del pedido
+const recalcularTotalPedido = async (pedidoId, tx = prisma) => {
+  const nuevoTotal = await tx.pedidoDet.aggregate({
+    where: { pedidoId },
+    _sum: { subtotal: true }
+  });
+
+  return await tx.pedidoEnc.update({
+    where: { id: pedidoId },
+    data: { total: nuevoTotal._sum.subtotal || 0 }
+  });
+};
 
 const pedidoController = {
   // POST /api/pedidos - Crear nuevo pedido
   crearPedido: async (req, res) => {
     try {
-      // Validar errores de entrada usando express-validator
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          error: 'Datos de entrada inválidos',
-          details: errors.array()
-        });
-      }
+      if (!validarErrores(req, res)) return;
 
       const { mesaId, items, observaciones } = req.body;
       const usuarioId = req.user.id; // Viene del middleware de autenticación

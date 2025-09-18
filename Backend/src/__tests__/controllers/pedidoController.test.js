@@ -11,8 +11,8 @@ describe('Pedido Controller Tests - Basic Structure', () => {
       const response = await request(app)
         .get('/api/pedidos');
 
-      // Should return 401 (requires auth) or 501 (not implemented)
-      expect([401, 501]).toContain(response.status);
+      // Should return 200 (success) or 401 (requires auth)
+      expect([200, 401]).toContain(response.status);
     });
 
     test('should handle invalid pedido routes', async () => {
@@ -29,7 +29,7 @@ describe('Pedido Controller Tests - Basic Structure', () => {
       const response = await request(app)
         .get('/api/pedidos');
 
-      expect([401, 501]).toContain(response.status);
+      expect([200, 401]).toContain(response.status);
     });
 
     test('POST /api/pedidos - should be available', async () => {
