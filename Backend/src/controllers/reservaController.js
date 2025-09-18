@@ -37,8 +37,6 @@ const validarErrores = (req, res) => {
   return true;
 };
 
-// Se usa helpers.validarId
-
 // Función auxiliar para formatear reserva con hora string
 const formatearReserva = (reserva) => {
   return {
@@ -53,7 +51,32 @@ const includeReservaCompleta = {
   usuario: { select: { nombre: true } }
 };
 
-// Se usa helpers.manejarError
+// Función auxiliar para obtener reserva por ID con validación
+const obtenerReservaPorId = async (id, res, includeOptions = includeReservaCompleta) => {
+  const reservaId = helpers.validarId(id, res, 'reserva');
+  if (!reservaId) return null;
+
+  const reserva = await prisma.reservaEnc.findUnique({
+    where: { id: reservaId },
+    include: includeOptions
+  });
+
+  if (!reserva) {
+    res.status(404).json({ error: 'Reserva no encontrada' });
+    return null;
+  }
+
+  return { reserva, reservaId };
+};
+
+// Función auxiliar para validar estado de reserva
+const validarEstadoReserva = (reserva, estadosPermitidos, res, mensaje) => {
+  if (!estadosPermitidos.includes(reserva.estado)) {
+    res.status(409).json({ error: mensaje });
+    return false;
+  }
+  return true;
+};
 
 const reservaController = {
   // POST /api/reservas
@@ -148,7 +171,7 @@ const reservaController = {
         return res.status(409).json({ error: 'La mesa ya está reservada para esa fecha y hora' });
       }
       // Otros errores
-      manejarError(error, res, 'crearReserva');
+      helpers.manejarError(error, res, 'crearReserva');
     }
   },
 
@@ -205,7 +228,7 @@ const reservaController = {
         }
       });
     } catch (error) {
-      manejarError(error, res, 'getReservas');
+      helpers.manejarError(error, res, 'getReservas');
     }
   },
 
@@ -214,33 +237,21 @@ const reservaController = {
   getReservaById: async (req, res) => {
     try {
       const { id } = req.params;
-    const reservaId = helpers.validarId(id, res, 'reserva');
-      if (!reservaId) return;
-
-      const reserva = await prisma.reservaEnc.findUnique({
-        where: { id: reservaId },
-        include: {
-          mesa: true,
-          usuario: { select: { nombre: true } },
-          detalles: { include: { articulo: true } }
-        }
+      const result = await obtenerReservaPorId(id, res, {
+        mesa: true,
+        usuario: { select: { nombre: true } },
+        detalles: { include: { articulo: true } }
       });
+      if (!result) return;
 
-      if (!reserva) {
-        return res.status(404).json({
-          error: 'Reserva no encontrada'
-        });
-      }
-
-      // Formatear la reserva para incluir la hora como string
-      const reservaFormateada = formatearReserva(reserva);
+      const reservaFormateada = formatearReserva(result.reserva);
 
       res.json({
         message: 'Reserva obtenida exitosamente',
         reserva: reservaFormateada
       });
     } catch (error) {
-  helpers.manejarError(error, res, 'getReservaById');
+      helpers.manejarError(error, res, 'getReservaById');
     }
   },
   actualizarReserva: async (req, res) => {
@@ -248,23 +259,13 @@ const reservaController = {
       if (!validarErrores(req, res)) return;
 
       const { id } = req.params;
-    const reservaId = helpers.validarId(id, res, 'reserva');
-      if (!reservaId) return;
+      const result = await obtenerReservaPorId(id, res, {});
+      if (!result) return;
 
-      const reservaExistente = await prisma.reservaEnc.findUnique({
-        where: { id: reservaId }
-      });
+      const { reserva: reservaExistente, reservaId } = result;
 
-      if (!reservaExistente) {
-        return res.status(404).json({
-          error: 'Reserva no encontrada'
-        });
-      }
-
-      if (reservaExistente.estado !== 'ACTIVA') {
-        return res.status(409).json({
-          error: 'Solo se pueden modificar reservas en estado ACTIVA'
-        });
+      if (!validarEstadoReserva(reservaExistente, ['ACTIVA'], res, 'Solo se pueden modificar reservas en estado ACTIVA')) {
+        return;
       }
 
       const { fechaReserva, horaReserva, numeroPersonas, nombreCliente, telefonoCliente, emailCliente, observaciones } = req.body;
@@ -301,7 +302,7 @@ const reservaController = {
         reserva: reservaFormateada
       });
     } catch (error) {
-  helpers.manejarError(error, res, 'actualizarReserva');
+      helpers.manejarError(error, res, 'actualizarReserva');
     }
   },
 
@@ -311,25 +312,15 @@ const reservaController = {
       if (!validarErrores(req, res)) return;
 
       const { id } = req.params;
-    const reservaId = helpers.validarId(id, res, 'reserva');
-      if (!reservaId) return;
-
       const { motivo } = req.body;
 
-      const reserva = await prisma.reservaEnc.findUnique({
-        where: { id: reservaId }
-      });
+      const result = await obtenerReservaPorId(id, res, {});
+      if (!result) return;
 
-      if (!reserva) {
-        return res.status(404).json({
-          error: 'Reserva no encontrada'
-        });
-      }
+      const { reserva, reservaId } = result;
 
-      if (!['ACTIVA', 'CONFIRMADA'].includes(reserva.estado)) {
-        return res.status(409).json({
-          error: 'Solo se pueden cancelar reservas ACTIVAS o CONFIRMADAS'
-        });
+      if (!validarEstadoReserva(reserva, ['ACTIVA', 'CONFIRMADA'], res, 'Solo se pueden cancelar reservas ACTIVAS o CONFIRMADAS')) {
+        return;
       }
 
       const reservaCancelada = await prisma.reservaEnc.update({
@@ -347,7 +338,7 @@ const reservaController = {
         reserva: reservaCancelada
       });
     } catch (error) {
-  helpers.manejarError(error, res, 'cancelarReserva');
+      helpers.manejarError(error, res, 'cancelarReserva');
     }
   },
 
@@ -355,24 +346,13 @@ const reservaController = {
   confirmarReserva: async (req, res) => {
     try {
       const { id } = req.params;
-    const reservaId = helpers.validarId(id, res, 'reserva');
-      if (!reservaId) return;
+      const result = await obtenerReservaPorId(id, res, { mesa: true });
+      if (!result) return;
 
-      const reserva = await prisma.reservaEnc.findUnique({
-        where: { id: reservaId },
-        include: { mesa: true }
-      });
+      const { reserva, reservaId } = result;
 
-      if (!reserva) {
-        return res.status(404).json({
-          error: 'Reserva no encontrada'
-        });
-      }
-
-      if (reserva.estado !== 'ACTIVA') {
-        return res.status(409).json({
-          error: 'Solo se pueden confirmar reservas ACTIVAS'
-        });
+      if (!validarEstadoReserva(reserva, ['ACTIVA'], res, 'Solo se pueden confirmar reservas ACTIVAS')) {
+        return;
       }
 
       const [reservaConfirmada] = await Promise.all([
@@ -391,7 +371,7 @@ const reservaController = {
         reserva: reservaConfirmada
       });
     } catch (error) {
-  helpers.manejarError(error, res, 'confirmarReserva');
+      helpers.manejarError(error, res, 'confirmarReserva');
     }
   },
 
@@ -438,7 +418,7 @@ const reservaController = {
         hayDisponibilidad: mesasLibres.length > 0
       });
     } catch (error) {
-  helpers.manejarError(error, res, 'verificarDisponibilidad');
+      helpers.manejarError(error, res, 'verificarDisponibilidad');
     }
   },
 
@@ -491,7 +471,7 @@ const reservaController = {
         estadisticas
       });
     } catch (error) {
-  helpers.manejarError(error, res, 'getReservasHoy');
+      helpers.manejarError(error, res, 'getReservasHoy');
     }
   },
 
@@ -499,24 +479,13 @@ const reservaController = {
   completarReserva: async (req, res) => {
     try {
       const { id } = req.params;
-    const reservaId = helpers.validarId(id, res, 'reserva');
-      if (!reservaId) return;
+      const result = await obtenerReservaPorId(id, res, { mesa: true });
+      if (!result) return;
 
-      const reserva = await prisma.reservaEnc.findUnique({
-        where: { id: reservaId },
-        include: { mesa: true }
-      });
+      const { reserva, reservaId } = result;
 
-      if (!reserva) {
-        return res.status(404).json({
-          error: 'Reserva no encontrada'
-        });
-      }
-
-      if (reserva.estado !== 'CONFIRMADA') {
-        return res.status(409).json({
-          error: 'Solo se pueden completar reservas CONFIRMADAS'
-        });
+      if (!validarEstadoReserva(reserva, ['CONFIRMADA'], res, 'Solo se pueden completar reservas CONFIRMADAS')) {
+        return;
       }
 
       const [reservaCompletada] = await Promise.all([
@@ -535,7 +504,7 @@ const reservaController = {
         reserva: reservaCompletada
       });
     } catch (error) {
-  helpers.manejarError(error, res, 'completarReserva');
+      helpers.manejarError(error, res, 'completarReserva');
     }
   }
 };
