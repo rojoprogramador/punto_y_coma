@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "nodemon src/app.js",
     "start": "node src/app.js",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
+    "test": "cross-env NODE_ENV=test jest",
+    "test:watch": "cross-env NODE_ENV=test jest --watch",
+    "test:coverage": "cross-env NODE_ENV=test jest --coverage",
+    "test:ci": "cross-env NODE_ENV=test DATABASE_URL=file:./test.db jest --coverage --watchAll=false",
+    "test:setup": "cross-env DATABASE_URL=file:./test.db npx prisma generate --schema=./prisma/schema.sqlite.prisma && cross-env DATABASE_URL=file:./test.db npx prisma db push --force-reset --schema=./prisma/schema.sqlite.prisma",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
@@ -37,21 +39,10 @@
     "morgan": "^1.10.1"
   },
   "devDependencies": {
+    "cross-env": "^10.0.0",
     "jest": "^30.1.3",
     "nodemon": "^3.1.10",
     "prisma": "^6.14.0",
     "supertest": "^7.1.4"
-  },
-  "jest": {
-    "testEnvironment": "node",
-    "testMatch": [
-      "**/__tests__/**/*.test.js",
-      "**/?(*.)+(spec|test).js"
-    ],
-    "collectCoverageFrom": [
-      "src/**/*.js",
-      "!src/app.js",
-      "!**/node_modules/**"
-    ]
   }
 }
