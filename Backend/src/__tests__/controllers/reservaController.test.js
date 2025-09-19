@@ -289,6 +289,32 @@ describe('Reserva Controller Tests', () => {
       expect(res.body.reserva.telefonoCliente).toBe('123456789');
       expect(res.body.reserva.emailCliente).toBe('test@example.com');
     });
+
+    test('debe manejar error P2003 (foreign key violation)', async () => {
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          ...baseReserva,
+          mesaPreferida: 999999 // Mesa que no existe para forzar P2003
+        });
+      expect([404, 409]).toContain(res.status);
+    });
+
+    test('debe manejar usuario inexistente en token', async () => {
+      // Crear token con usuario que no existe
+      const fakeToken = jwt.sign(
+        { id: 999999, email: 'fake@example.com', rol: 'ADMIN' },
+        process.env.JWT_SECRET || 'tu-secreto-jwt-aqui',
+        { expiresIn: '1h' }
+      );
+
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${fakeToken}`)
+        .send(baseReserva);
+      expect([401, 404, 500]).toContain(res.status);
+    });
     
     afterEach(async () => {
       // Limpiar reservas de prueba
