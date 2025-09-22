@@ -1,0 +1,222 @@
+// Schema SQLite para testing en CI/CD
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum EstadoMesa {
+  DISPONIBLE
+  OCUPADA
+  RESERVADA
+  MANTENIMIENTO
+}
+
+enum EstadoPedido {
+  PENDIENTE
+  EN_PREPARACION
+  LISTO
+  ENTREGADO
+  CANCELADO
+}
+
+enum EstadoReserva {
+  ACTIVA
+  CONFIRMADA
+  CANCELADA
+  COMPLETADA
+}
+
+enum EstadoItemPedido {
+  PENDIENTE
+  EN_PREPARACION
+  LISTO
+  ENTREGADO
+}
+
+enum TipoUsuario {
+  ADMIN
+  MESERO
+  COCINERO
+  CAJERO
+}
+
+// Modelos principales
+model Usuario {
+  id         Int           @id @default(autoincrement())
+  nombre     String
+  email      String        @unique
+  password   String
+  rol        TipoUsuario
+  activo     Boolean       @default(true)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  // Relaciones
+  pedidos    PedidoEnc[]
+  facturas   FacturaEnc[]
+  reservas   ReservaEnc[]
+
+  @@map("usuarios")
+}
+
+model Mesa {
+  id          Int         @id @default(autoincrement())
+  numero      Int         @unique
+  capacidad   Int
+  estado      EstadoMesa  @default(DISPONIBLE)
+  ubicacion   String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relaciones
+  reservas    ReservaEnc[]
+  pedidos     PedidoEnc[]
+
+  @@map("mesas")
+}
+
+model Articulo {
+  id           Int              @id @default(autoincrement())
+  nombre       String
+  descripcion  String?
+  precio       Float            // SQLite usa Float en lugar de Decimal
+  categoria    String
+  disponible   Boolean          @default(true)
+  imagen       String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  // Relaciones
+  pedidoDetalles   PedidoDet[]
+  facturaDetalles  FacturaDet[]
+  reservaDetalles  ReservaDet[]
+
+  @@map("articulos")
+}
+
+model ReservaEnc {
+  id                Int             @id @default(autoincrement())
+  fechaReserva      DateTime
+  horaReserva       DateTime
+  numeroPersonas    Int
+  nombreCliente     String
+  telefonoCliente   String?
+  emailCliente      String?
+  estado            EstadoReserva   @default(ACTIVA)
+  observaciones     String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  // Relaciones
+  usuarioId         Int
+  usuario           Usuario         @relation(fields: [usuarioId], references: [id])
+  mesaId            Int
+  mesa              Mesa            @relation(fields: [mesaId], references: [id])
+  detalles          ReservaDet[]
+
+  @@map("reservas_enc")
+}
+
+model ReservaDet {
+  id             Int           @id @default(autoincrement())
+  cantidad       Int
+  precioUnitario Float
+  subtotal       Float
+  observaciones  String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  // Relaciones
+  reservaId      Int
+  reserva        ReservaEnc    @relation(fields: [reservaId], references: [id])
+  articuloId     Int
+  articulo       Articulo      @relation(fields: [articuloId], references: [id])
+
+  @@map("reservas_det")
+}
+
+model PedidoEnc {
+  id            Int           @id @default(autoincrement())
+  numeroPedido  String        @unique
+  fechaPedido   DateTime      @default(now())
+  estado        EstadoPedido  @default(PENDIENTE)
+  total         Float
+  observaciones String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // Relaciones
+  usuarioId     Int
+  usuario       Usuario       @relation(fields: [usuarioId], references: [id])
+  mesaId        Int
+  mesa          Mesa          @relation(fields: [mesaId], references: [id])
+  detalles      PedidoDet[]
+  factura       FacturaEnc?
+
+  @@map("pedidos_enc")
+}
+
+model PedidoDet {
+  id             Int               @id @default(autoincrement())
+  cantidad       Int
+  precioUnitario Float
+  subtotal       Float
+  estado         EstadoItemPedido  @default(PENDIENTE)
+  observaciones  String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  // Relaciones
+  pedidoId       Int
+  pedido         PedidoEnc         @relation(fields: [pedidoId], references: [id])
+  articuloId     Int
+  articulo       Articulo          @relation(fields: [articuloId], references: [id])
+
+  @@map("pedidos_det")
+}
+
+model FacturaEnc {
+  id               Int           @id @default(autoincrement())
+  numeroFactura    String        @unique
+  fechaFactura     DateTime      @default(now())
+  nombreCliente    String?
+  nifCliente       String?
+  direccionCliente String?
+  subtotal         Float
+  impuestos        Float
+  total            Float
+  metodoPago       String
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  // Relaciones
+  usuarioId        Int
+  usuario          Usuario       @relation(fields: [usuarioId], references: [id])
+  pedidoId         Int           @unique
+  pedido           PedidoEnc     @relation(fields: [pedidoId], references: [id])
+  detalles         FacturaDet[]
+
+  @@map("facturas_enc")
+}
+
+model FacturaDet {
+  id             Int           @id @default(autoincrement())
+  cantidad       Int
+  precioUnitario Float
+  subtotal       Float
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  // Relaciones
+  facturaId      Int
+  factura        FacturaEnc    @relation(fields: [facturaId], references: [id])
+  articuloId     Int
+  articulo       Articulo      @relation(fields: [articuloId], references: [id])
+
+  @@map("facturas_det")
+}

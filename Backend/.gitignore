@@ -12,6 +12,8 @@ yarn-error.log*
 
 # Prisma
 /generated/prisma
+prisma/test.db
+*.db
 
 # Logs
 logs/
