@@ -34,6 +34,12 @@ describe('Auth Middleware Tests', () => {
 
     // Clear all mocks
     jest.clearAllMocks();
+    mockUsuarioFindUnique.mockClear();
+  });
+
+  afterEach(() => {
+    // Additional cleanup
+    mockUsuarioFindUnique.mockReset();
   });
 
   describe('verifyToken middleware', () => {
