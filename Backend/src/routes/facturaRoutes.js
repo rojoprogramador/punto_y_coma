@@ -6,6 +6,7 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const facturaController = require('../controllers/facturaController');
+const authMiddleware = require('../middleware/auth');
 // TODO: Importar middlewares cuando estén implementados
 // const authMiddleware = require('../middleware/auth');
 // const roleMiddleware = require('../middleware/role');
@@ -21,6 +22,7 @@ const router = express.Router();
 // - page: número de página para paginación
 // - limit: límite de resultados por página
 router.get('/', [
+  authMiddleware.verifyToken,
   query('fechaDesde')
     .optional()
     .isDate()
@@ -49,7 +51,10 @@ router.get('/', [
 
 // TODO: GET /api/facturas/estadisticas - Estadísticas de facturación
 // Para dashboard principal - requiere rol CAJERO o ADMIN
-router.get('/estadisticas', facturaController.getEstadisticas);
+router.get('/estadisticas', [
+    authMiddleware.verifyToken,
+    authMiddleware.requireAdmin(),
+], facturaController.getEstadisticas);
 
 // TODO: GET /api/facturas/reportes/ventas - Reporte de ventas
 // Parámetros de query:
@@ -58,6 +63,8 @@ router.get('/estadisticas', facturaController.getEstadisticas);
 // - agrupadoPor: 'dia', 'semana', 'mes'
 // - metodoPago: filtrar por método específico
 router.get('/reportes/ventas', [
+  authMiddleware.verifyToken,
+  authMiddleware.requireAdmin(),
   query('fechaDesde')
     .notEmpty()
     .withMessage('Fecha desde es requerida')
@@ -89,14 +96,24 @@ router.get('/numero/:numero', [
 
 // TODO: GET /api/facturas/:id - Obtener factura por ID
 router.get('/:id', [
+  authMiddleware.verifyToken,
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID debe ser un número entero válido')
 ], facturaController.getFacturaById);
 
+//? GET /api/facturas/:id/detalle - Obtener detalles de la factura.
+router.get('/:id/detalles', [
+  authMiddleware.verifyToken,
+  param('id')
+    .isInt({ min: 1 })
+    .withMessage('ID debe ser un número entero válido')
+], facturaController.getDetallesByFacturaId);
+
 // TODO: GET /api/facturas/:id/imprimir - Generar PDF de factura
 // Retorna PDF como stream o base64
 router.get('/:id/imprimir', [
+  authMiddleware.verifyToken,
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID debe ser un número entero válido')
@@ -107,6 +124,7 @@ router.get('/:id/imprimir', [
 // Solo se puede generar desde pedidos LISTO o ENTREGADO
 // Requiere rol CAJERO o ADMIN
 router.post('/generar/:pedidoId', [
+  authMiddleware.verifyToken,
   param('pedidoId')
     .isInt({ min: 1 })
     .withMessage('ID de pedido debe ser un número entero válido'),
@@ -142,6 +160,8 @@ router.post('/generar/:pedidoId', [
 // Solo ADMIN puede anular facturas
 // Solo se pueden anular facturas del mismo día
 router.put('/:id/anular', [
+  authMiddleware.verifyToken,
+  authMiddleware.requireAdmin(),
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID debe ser un número entero válido'),

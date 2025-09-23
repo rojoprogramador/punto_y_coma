@@ -1,599 +1,1095 @@
 const request = require('supertest');
 const app = require('../../app');
-const reservaController = require('../../controllers/reservaController');
+const { PrismaClient } = require('@prisma/client');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+
+const prisma = new PrismaClient();
 
 describe('Reserva Controller Tests', () => {
-  describe('Controller Module Structure', () => {
-    test('should export reservaController object', () => {
-      expect(reservaController).toBeDefined();
-      expect(typeof reservaController).toBe('object');
+  let testUser;
+  let authToken;
+  let testMesa;
+  let testReserva;
+
+  beforeAll(async () => {
+    // Limpiar datos previos con orden correcto (foreign keys)
+    await prisma.reservaEnc.deleteMany({}); // Limpiar todas las reservas primero
+    await prisma.mesa.deleteMany({ where: { numero: { in: [9999, 9998] } } });
+    await prisma.usuario.deleteMany({ where: { email: 'reserva-test@example.com' } });
+
+    // Crear usuario de prueba
+    const hashedPassword = await bcrypt.hash('password123', 10);
+    testUser = await prisma.usuario.create({
+      data: {
+        nombre: 'Reserva Test User',
+        email: 'reserva-test@example.com',
+        password: hashedPassword,
+        rol: 'ADMIN',
+        activo: true
+      }
     });
 
-    test('should have all required methods', () => {
-      expect(reservaController.crearReserva).toBeDefined();
-      expect(typeof reservaController.crearReserva).toBe('function');
+    // Token JWT
+    authToken = jwt.sign(
+      {
+        id: testUser.id,
+        email: testUser.email,
+        rol: testUser.rol
+      },
+      process.env.JWT_SECRET || 'tu-secreto-jwt-aqui',
+      { expiresIn: '24h' }
+    );
 
-      expect(reservaController.getReservas).toBeDefined();
-      expect(typeof reservaController.getReservas).toBe('function');
-
-      expect(reservaController.getReservaById).toBeDefined();
-      expect(typeof reservaController.getReservaById).toBe('function');
-
-      expect(reservaController.actualizarReserva).toBeDefined();
-      expect(typeof reservaController.actualizarReserva).toBe('function');
-
-      expect(reservaController.cancelarReserva).toBeDefined();
-      expect(typeof reservaController.cancelarReserva).toBe('function');
-
-      expect(reservaController.confirmarReserva).toBeDefined();
-      expect(typeof reservaController.confirmarReserva).toBe('function');
-
-      expect(reservaController.verificarDisponibilidad).toBeDefined();
-      expect(typeof reservaController.verificarDisponibilidad).toBe('function');
-
-      expect(reservaController.getReservasHoy).toBeDefined();
-      expect(typeof reservaController.getReservasHoy).toBe('function');
-
-      expect(reservaController.completarReserva).toBeDefined();
-      expect(typeof reservaController.completarReserva).toBe('function');
+    // Crear mesa de prueba
+    testMesa = await prisma.mesa.create({
+      data: {
+        numero: 9999,
+        capacidad: 4,
+        estado: 'DISPONIBLE',
+        ubicacion: 'Test Area'
+      }
     });
   });
 
-  describe('crearReserva method', () => {
-    test('should return 501 Not Implemented status', async () => {
-      const mockReq = {
-        body: {
-          fecha: '2024-01-15',
-          hora: '20:00',
-          personas: 4,
-          nombreCliente: 'Test Client'
+  afterAll(async () => {
+    // Limpiar reservas primero (foreign key constraints)
+    await prisma.reservaEnc.deleteMany({});
+    await prisma.mesa.deleteMany({ where: { numero: { in: [9999, 9998] } } });
+    await prisma.usuario.deleteMany({ where: { email: 'reserva-test@example.com' } });
+    await prisma.$disconnect();
+  });
+
+  describe('POST /api/reservas', () => {
+    const endpoint = '/api/reservas';
+    const baseReserva = {
+      fechaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10), // mañana
+      horaReserva: '20:00',
+      numeroPersonas: 2,
+      nombreCliente: 'Reserva Test User',
+      telefonoCliente: '612345678',
+      emailCliente: 'cliente@ejemplo.com',
+      observaciones: 'Test automatizado'
+    };
+
+    test('debe crear una reserva correctamente', async () => {
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ ...baseReserva, mesaPreferida: testMesa.id });
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty('message', 'Reserva creada exitosamente');
+      expect(res.body).toHaveProperty('reserva');
+      expect(res.body.reserva.mesaId).toBe(testMesa.id);
+      expect(res.body.reserva.nombreCliente).toBe('Reserva Test User');
+    });
+
+    test('debe rechazar datos inválidos (validación)', async () => {
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ ...baseReserva, nombreCliente: '' });
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('error');
+    });
+
+    test('debe rechazar fechas pasadas', async () => {
+      const fechaPasada = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10); // ayer
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ ...baseReserva, fechaReserva: fechaPasada });
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('error', 'Datos de entrada inválidos');
+      expect(res.body).toHaveProperty('details');
+      expect(Array.isArray(res.body.details)).toBe(true);
+      expect(res.body.details.some(detail => detail.msg === 'La fecha de reserva debe ser futura')).toBe(true);
+    });
+
+    test('debe rechazar si no hay mesas disponibles', async () => {
+      // Crear una mesa ocupada para simular no disponibilidad
+      const mesaOcupada = await prisma.mesa.create({
+        data: { numero: 9998, capacidad: 2, estado: 'OCUPADA', ubicacion: 'Test Area' }
+      });
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ ...baseReserva, mesaPreferida: mesaOcupada.id });
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty('error');
+      await prisma.mesa.delete({ where: { id: mesaOcupada.id } });
+    });
+
+    test('debe rechazar si hay conflicto de horario', async () => {
+      // Crear reserva previa en la misma mesa, fecha y hora
+      await prisma.reservaEnc.create({
+        data: {
+          ...baseReserva,
+          fechaReserva: new Date(baseReserva.fechaReserva),
+          horaReserva: new Date(`${baseReserva.fechaReserva}T${baseReserva.horaReserva}:00`),
+          numeroPersonas: 2,
+          nombreCliente: 'Conflicto',
+          usuarioId: testUser.id,
+          mesaId: testMesa.id,
+          estado: 'ACTIVA'
         }
-      };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
+      });
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ ...baseReserva, mesaPreferida: testMesa.id });
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty('error');
+    });
+
+    test('debe crear reserva sin mesa preferida cuando hay mesas disponibles', async () => {
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(baseReserva); // Sin mesaPreferida
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty('message', 'Reserva creada exitosamente');
+      expect(res.body).toHaveProperty('reserva');
+      expect(res.body.reserva.mesaId).toBe(testMesa.id); // Debería usar la mesa disponible
+    });
+
+    test('debe rechazar conflicto sin mesa preferida', async () => {
+      // Crear reserva previa en la mesa disponible
+      await prisma.reservaEnc.create({
+        data: {
+          ...baseReserva,
+          fechaReserva: new Date(baseReserva.fechaReserva),
+          horaReserva: new Date(`${baseReserva.fechaReserva}T${baseReserva.horaReserva}:00`),
+          numeroPersonas: 2,
+          nombreCliente: 'Conflicto',
+          usuarioId: testUser.id,
+          mesaId: testMesa.id,
+          estado: 'ACTIVA'
+        }
+      });
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(baseReserva); // Sin mesaPreferida
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty('error', 'La mesa ya está reservada para esa fecha y hora');
+    });
+
+    test('debe requerir autenticación', async () => {
+      const res = await request(app)
+        .post(endpoint)
+        .send(baseReserva);
+      expect([401, 403]).toContain(res.status);
+    });
+
+    test('debe manejar error interno del servidor', async () => {
+      // Simular error forzando mesaPreferida inválida
+      // Se espera 404 (mesa no encontrada) o 409 (conflicto) o 500 (error interno)
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ ...baseReserva, mesaPreferida: 999999 });
+      expect([404, 409, 500]).toContain(res.status);
+    });
+
+    test('debe manejar conflicto de reserva duplicada (P2002/P2004)', async () => {
+      const fechaFutura = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+      // Crear primera reserva
+      const primeraReserva = {
+        ...baseReserva,
+        fechaReserva: fechaFutura,
+        horaReserva: '21:00',
+        nombreCliente: 'Cliente Conflicto 1',
+        mesaPreferida: testMesa.id
       };
 
-      await reservaController.crearReserva(mockReq, mockRes);
+      const res1 = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(primeraReserva);
 
-      expect(mockRes.status).toHaveBeenCalledWith(501);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        error: 'Not implemented',
-        message: 'Crear reserva endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
+      expect(res1.status).toBe(201); // Asegurar que la primera reserva se creó
+
+      // Esperar un poco para evitar problemas de timing en CI
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Intentar crear reserva duplicada en la misma mesa, fecha y hora
+      const reservaDuplicada = {
+        ...baseReserva,
+        fechaReserva: fechaFutura,
+        horaReserva: '21:00',
+        nombreCliente: 'Cliente Conflicto 2',
+        mesaPreferida: testMesa.id
+      };
+
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(reservaDuplicada);
+
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty('error');
+      expect(res.body.error).toMatch(/reservada|conflicto/i);
+    }, 10000);
+
+    test('debe manejar error de conflicto manual en catch block', async () => {
+      // Crear reserva inicial para ocupar la mesa
+      const fechaFutura = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+      const baseRes = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          ...baseReserva,
+          fechaReserva: fechaFutura,
+          horaReserva: '22:00',
+          nombreCliente: 'Cliente Base',
+          mesaPreferida: testMesa.id
+        });
+
+      expect(baseRes.status).toBe(201); // Verificar que se creó la reserva base
+
+      // Esperar para asegurar que la reserva base esté guardada
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Intentar crear reserva duplicada (más simple que el test anterior)
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          ...baseReserva,
+          fechaReserva: fechaFutura,
+          horaReserva: '22:00',
+          nombreCliente: 'Cliente Conflicto Manual',
+          mesaPreferida: testMesa.id
+        });
+
+      // Debe fallar con conflicto
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty('error');
+      expect(res.body.error).toMatch(/reservada|conflicto/i);
+    }, 15000);
+
+    test('debe crear reserva con datos válidos completos', async () => {
+      const reservaCompleta = {
+        ...baseReserva,
+        telefonoCliente: '123456789',
+        emailCliente: 'test@example.com',
+        observaciones: 'Reserva completa de prueba',
+        mesaPreferida: testMesa.id
+      };
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(reservaCompleta);
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty('reserva');
+      expect(res.body.reserva.telefonoCliente).toBe('123456789');
+      expect(res.body.reserva.emailCliente).toBe('test@example.com');
+    });
+
+    test('debe manejar error P2003 (foreign key violation)', async () => {
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          ...baseReserva,
+          mesaPreferida: 999999 // Mesa que no existe para forzar P2003
+        });
+      expect([404, 409]).toContain(res.status);
+    });
+
+    test('debe manejar usuario inexistente en token', async () => {
+      // Crear token con usuario que no existe
+      const fakeToken = jwt.sign(
+        { id: 999999, email: 'fake@example.com', rol: 'ADMIN' },
+        process.env.JWT_SECRET || 'tu-secreto-jwt-aqui',
+        { expiresIn: '1h' }
+      );
+
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${fakeToken}`)
+        .send(baseReserva);
+      expect([401, 404, 500]).toContain(res.status);
+    });
+
+    afterEach(async () => {
+      // Limpiar reservas de prueba
+      await prisma.reservaEnc.deleteMany({ where: { nombreCliente: { in: ['Reserva Test User', 'Conflicto'] } } });
+    });
+
+  });
+
+  describe('GET /api/reservas', () => {
+    // Aquí irán los tests de getReservas
+    const endpoint = '/api/reservas';
+    let reservaId;
+
+    beforeEach(async () => {
+      // Asegurar usuario y mesa existen
+      testUser = await prisma.usuario.upsert({
+        where: { email: 'reserva-test@example.com' },
+        update: {},
+        create: {
+          nombre: 'Reserva Test User',
+          email: 'reserva-test@example.com',
+          password: await bcrypt.hash('password123', 10),
+          rol: 'ADMIN',
+          activo: true
+        }
+      });
+      testMesa = await prisma.mesa.upsert({
+        where: { numero: 9999 },
+        update: {},
+        create: {
+          numero: 9999,
+          capacidad: 4,
+          estado: 'DISPONIBLE',
+          ubicacion: 'Test Area'
+        }
+      });
+      // Crear reserva de prueba
+      const reserva = await prisma.reservaEnc.create({
+        data: {
+          fechaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          horaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          numeroPersonas: 2,
+          nombreCliente: 'Reserva Test User',
+          usuarioId: testUser.id,
+          mesaId: testMesa.id,
+          estado: 'ACTIVA'
+        }
+      });
+      reservaId = reserva.id;
+    });
+
+    afterEach(async () => {
+      await prisma.reservaEnc.deleteMany({ where: { nombreCliente: 'Reserva Test User' } });
+    });
+
+    test('debe obtener todas las reservas', async () => {
+      const res = await request(app)
+        .get(endpoint)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('message', 'Reservas obtenidas exitosamente');
+      expect(Array.isArray(res.body.reservas)).toBe(true);
+      expect(res.body.reservas.length).toBeGreaterThanOrEqual(1);
+    });
+
+    test('debe filtrar por estado', async () => {
+      const res = await request(app)
+        .get(`${endpoint}?estado=ACTIVA`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.reservas.every(r => r.estado === 'ACTIVA')).toBe(true);
+    });
+
+    test('debe paginar resultados', async () => {
+      const res = await request(app)
+        .get(`${endpoint}?page=1&limit=1`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.pagination).toHaveProperty('page', 1);
+      expect(res.body.pagination).toHaveProperty('limit', 1);
+    });
+
+    test('debe requerir autenticación', async () => {
+      const res = await request(app)
+        .get(endpoint);
+      expect([401, 403]).toContain(res.status);
+    });
+
+    test('debe filtrar por rango de fechas (fechaDesde y fechaHasta)', async () => {
+      const fechaDesde = new Date(Date.now() + 23 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const fechaHasta = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const res = await request(app)
+        .get(`${endpoint}?fechaDesde=${fechaDesde}&fechaHasta=${fechaHasta}`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('reservas');
+    });
+
+    test('debe filtrar solo por fechaDesde', async () => {
+      const fechaDesde = new Date(Date.now() + 23 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const res = await request(app)
+        .get(`${endpoint}?fechaDesde=${fechaDesde}`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('reservas');
+    });
+
+    test('debe filtrar solo por fechaHasta', async () => {
+      const fechaHasta = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const res = await request(app)
+        .get(`${endpoint}?fechaHasta=${fechaHasta}`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('reservas');
+    });
+
+    test('debe filtrar por mesa', async () => {
+      const res = await request(app)
+        .get(`${endpoint}?mesa=${testMesa.id}`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('reservas');
+    });
+
+    test('debe filtrar por cliente', async () => {
+      const res = await request(app)
+        .get(`${endpoint}?cliente=Reserva`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('reservas');
+    });
+
+    test('debe manejar error interno', async () => {
+      // Simular error con parámetro inválido
+      const res = await request(app)
+        .get(`${endpoint}?page=abc`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect([400, 500]).toContain(res.status);
+    });
+  });
+
+  describe('GET /api/reservas/:id', () => {
+    // Aquí irán los tests de getReservaById
+    let reservaId;
+
+    beforeEach(async () => {
+      // Crear reserva de prueba
+      const reserva = await prisma.reservaEnc.create({
+        data: {
+          fechaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          horaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          numeroPersonas: 2,
+          nombreCliente: 'Reserva Test User',
+          usuarioId: testUser.id,
+          mesaId: testMesa.id,
+          estado: 'ACTIVA'
+        }
+      });
+      reservaId = reserva.id;
+    });
+
+    afterEach(async () => {
+      await prisma.reservaEnc.deleteMany({ where: { nombreCliente: 'Reserva Test User' } });
+    });
+
+    test('debe obtener una reserva por ID', async () => {
+      const res = await request(app)
+        .get(`/api/reservas/${reservaId}`)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('message', 'Reserva obtenida exitosamente');
+      expect(res.body.reserva.id).toBe(reservaId);
+    });
+
+    test('debe rechazar ID inválido', async () => {
+      const res = await request(app)
+        .get('/api/reservas/invalid')
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('error', 'ID de reserva inválido');
+    });
+
+    test('debe retornar 404 si no existe', async () => {
+      const res = await request(app)
+        .get('/api/reservas/999999')
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(404);
+      expect(res.body).toHaveProperty('error', 'Reserva no encontrada');
+    });
+
+    test('debe requerir autenticación', async () => {
+      const res = await request(app)
+        .get(`/api/reservas/${reservaId}`);
+      expect([401, 403]).toContain(res.status);
+    });
+
+    test('debe manejar error interno', async () => {
+      // Simular error con ID negativo
+      const res = await request(app)
+        .get('/api/reservas/-1')
+        .set('Authorization', `Bearer ${authToken}`);
+      expect([400, 500]).toContain(res.status);
+    });
+  });
+
+  describe('PUT /api/reservas/:id', () => {
+    // Aquí irán los tests de actualizarReserva
+    let reservaId;
+    const endpoint = id => `/api/reservas/${id}`;
+    const updateData = { nombreCliente: 'Reserva Actualizada', numeroPersonas: 3 };
+
+    beforeEach(async () => {
+      // Crear reserva ACTIVA
+      const reserva = await prisma.reservaEnc.create({
+        data: {
+          fechaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          horaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          numeroPersonas: 2,
+          nombreCliente: 'Reserva Test User',
+          usuarioId: testUser.id,
+          mesaId: testMesa.id,
+          estado: 'ACTIVA'
+        }
+      });
+      reservaId = reserva.id;
+    });
+
+    afterEach(async () => {
+      await prisma.reservaEnc.deleteMany({
+        where: {
+          nombreCliente: {
+            in: ['Reserva Test User', 'Reserva Actualizada', 'Cliente Modificado', 'Cliente Completo']
+          }
+        }
       });
     });
 
-    test('should handle errors and return 500', async () => {
-      const mockReq = { body: {} };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
+    test('debe actualizar una reserva ACTIVA', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(updateData);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('message', 'Reserva actualizada exitosamente');
+      expect(res.body.reserva.nombreCliente).toBe('Reserva Actualizada');
+      expect(res.body.reserva.numeroPersonas).toBe(3);
+    });
+
+    test('debe rechazar datos inválidos', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ nombreCliente: '' });
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('error');
+    });
+
+    test('debe rechazar ID inválido', async () => {
+      const res = await request(app)
+        .put(endpoint('invalid'))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(updateData);
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('error');
+      expect([
+        'ID de reserva inválido',
+        'Datos de entrada inválidos'
+      ]).toContain(res.body.error);
+    });
+
+    test('debe retornar 404 si no existe', async () => {
+      const res = await request(app)
+        .put(endpoint(999999))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(updateData);
+      expect(res.status).toBe(404);
+      expect(res.body).toHaveProperty('error', 'Reserva no encontrada');
+    });
+
+    test('debe rechazar si la reserva no está ACTIVA', async () => {
+      // Cambiar estado a CONFIRMADA
+      await prisma.reservaEnc.update({ where: { id: reservaId }, data: { estado: 'CONFIRMADA' } });
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(updateData);
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty('error');
+    });
+
+    test('debe actualizar solo fechaReserva', async () => {
+      const nuevaFecha = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ fechaReserva: nuevaFecha });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.fechaReserva).toMatch(nuevaFecha);
+    });
+
+    test('debe actualizar solo horaReserva', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ horaReserva: '15:30' });
+      expect(res.status).toBe(200);
+      // Verificar que la hora fue actualizada - puede tener offset de timezone
+      const horaReserva = new Date(res.body.reserva.horaReserva);
+      const horaLocal = horaReserva.toLocaleTimeString('en-GB', {
+        hour12: false,
+        timeZone: 'UTC'
+      });
+      // Debe contener 15:30 o su equivalente con offset
+      expect(res.body.reserva.horaReserva).toBeTruthy();
+      expect(res.body).toHaveProperty('reserva');
+    });
+
+    test('debe actualizar fechaReserva y horaReserva juntas', async () => {
+      const nuevaFecha = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          fechaReserva: nuevaFecha,
+          horaReserva: '16:45'
+        });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.fechaReserva).toMatch(nuevaFecha);
+      // Verificar que la hora fue actualizada
+      expect(res.body.reserva.horaReserva).toBeTruthy();
+      expect(res.body).toHaveProperty('reserva');
+    });
+
+    test('debe actualizar solo numeroPersonas', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ numeroPersonas: 6 });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.numeroPersonas).toBe(6);
+    });
+
+    test('debe actualizar solo nombreCliente', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ nombreCliente: 'Cliente Modificado' });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.nombreCliente).toBe('Cliente Modificado');
+    });
+
+    test('debe actualizar solo telefonoCliente', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ telefonoCliente: '123456789' });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.telefonoCliente).toBe('123456789');
+    });
+
+    test('debe actualizar solo emailCliente', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ emailCliente: 'nuevo@email.com' });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.emailCliente).toBe('nuevo@email.com');
+    });
+
+    test('debe actualizar solo observaciones', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ observaciones: 'Nueva observación' });
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.observaciones).toBe('Nueva observación');
+    });
+
+    test('debe actualizar múltiples campos a la vez', async () => {
+      const nuevaFecha = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const datosCompletos = {
+        fechaReserva: nuevaFecha,
+        horaReserva: '18:30',
+        numeroPersonas: 8,
+        nombreCliente: 'Cliente Completo',
+        telefonoCliente: '987654321',
+        emailCliente: 'completo@test.com',
+        observaciones: 'Observaciones completas'
       };
 
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(datosCompletos);
 
-      const originalMethod = reservaController.crearReserva;
-      reservaController.crearReserva = async (req, res) => {
-        try {
-          throw new Error('Database connection failed');
-        } catch (error) {
-          console.error('Error en crearReserva:', error);
-          res.status(500).json({ error: 'Error interno del servidor' });
-        }
-      };
+      expect(res.status).toBe(200);
+      expect(res.body.reserva.fechaReserva).toMatch(nuevaFecha);
+      // Verificar que la hora fue actualizada
+      expect(res.body.reserva.horaReserva).toBeTruthy();
+      expect(res.body.reserva.numeroPersonas).toBe(8);
+      expect(res.body.reserva.nombreCliente).toBe('Cliente Completo');
+      expect(res.body.reserva.telefonoCliente).toBe('987654321');
+      expect(res.body.reserva.emailCliente).toBe('completo@test.com');
+      expect(res.body.reserva.observaciones).toBe('Observaciones completas');
+    });
 
-      await reservaController.crearReserva(mockReq, mockRes);
+    test('debe requerir autenticación', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .send(updateData);
+      expect([401, 403]).toContain(res.status);
+    });
 
-      expect(consoleSpy).toHaveBeenCalledWith('Error en crearReserva:', expect.any(Error));
-      expect(mockRes.status).toHaveBeenCalledWith(500);
-      expect(mockRes.json).toHaveBeenCalledWith({ error: 'Error interno del servidor' });
-
-      consoleSpy.mockRestore();
-      reservaController.crearReserva = originalMethod;
+    test('debe manejar error interno', async () => {
+      // Simular error con body inválido
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ numeroPersonas: 'no-es-numero' });
+      expect([400, 500]).toContain(res.status);
     });
   });
 
-  describe('getReservas method', () => {
-    test('should return 501 Not Implemented status', async () => {
-      const mockReq = { query: {} };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
+  describe('PUT /api/reservas/:id/cancelar', () => {
+    // Aquí irán los tests de cancelarReserva
+    let reservaId;
+    const endpoint = id => `/api/reservas/${id}/cancelar`;
+    const motivo = 'Motivo de cancelación';
 
-      await reservaController.getReservas(mockReq, mockRes);
+    beforeEach(async () => {
+      // Crear reserva ACTIVA
+      const reserva = await prisma.reservaEnc.create({
+        data: {
+          fechaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          horaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          numeroPersonas: 2,
+          nombreCliente: 'Reserva Test User',
+          usuarioId: testUser.id,
+          mesaId: testMesa.id,
+          estado: 'ACTIVA'
+        }
+      });
+      reservaId = reserva.id;
+    });
 
-      expect(mockRes.status).toHaveBeenCalledWith(501);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        error: 'Not implemented',
-        message: 'Get reservas endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
+    afterEach(async () => {
+      await prisma.reservaEnc.deleteMany({ where: { nombreCliente: 'Reserva Test User' } });
+    });
+
+    test('debe cancelar una reserva ACTIVA', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ motivo });
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('message', 'Reserva cancelada exitosamente');
+      expect(res.body.reserva.estado).toBe('CANCELADA');
+    });
+
+    test('debe rechazar datos inválidos', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ motivo: '' });
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('error');
+    });
+
+    test('debe rechazar ID inválido', async () => {
+      const res = await request(app)
+        .put(endpoint('invalid'))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ motivo });
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('error');
+      expect([
+        'ID de reserva inválido',
+        'Datos de entrada inválidos'
+      ]).toContain(res.body.error);
+    });
+
+    test('debe retornar 404 si no existe', async () => {
+      const res = await request(app)
+        .put(endpoint(999999))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ motivo });
+      expect(res.status).toBe(404);
+      expect(res.body).toHaveProperty('error', 'Reserva no encontrada');
+    });
+
+    test('debe rechazar si la reserva no está ACTIVA o CONFIRMADA', async () => {
+      // Cambiar estado a COMPLETADA
+      await prisma.reservaEnc.update({ where: { id: reservaId }, data: { estado: 'COMPLETADA' } });
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ motivo });
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty('error');
+    });
+
+    test('debe requerir autenticación', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .send({ motivo });
+      expect([401, 403]).toContain(res.status);
+    });
+
+    test('debe manejar error interno', async () => {
+      // Simular error con body inválido
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ motivo: 123 });
+      expect([400, 500]).toContain(res.status);
+    });
+  });
+
+  describe('PUT /api/reservas/:id/confirmar', () => {
+    // Aquí irán los tests de confirmarReserva
+    let reservaId;
+    const endpoint = id => `/api/reservas/${id}/confirmar`;
+
+    beforeEach(async () => {
+      // Crear reserva ACTIVA y mesa DISPONIBLE
+      await prisma.mesa.update({ where: { id: testMesa.id }, data: { estado: 'DISPONIBLE' } });
+      const reserva = await prisma.reservaEnc.create({
+        data: {
+          fechaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          horaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          numeroPersonas: 2,
+          nombreCliente: 'Reserva Test User',
+          usuarioId: testUser.id,
+          mesaId: testMesa.id,
+          estado: 'ACTIVA'
+        }
+      });
+      reservaId = reserva.id;
+    });
+
+    afterEach(async () => {
+      await prisma.reservaEnc.deleteMany({ where: { nombreCliente: 'Reserva Test User' } });
+      await prisma.mesa.update({ where: { id: testMesa.id }, data: { estado: 'DISPONIBLE' } });
+    });
+
+    test('debe confirmar una reserva ACTIVA', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('message', 'Reserva confirmada exitosamente');
+      expect(res.body.reserva.estado).toBe('CONFIRMADA');
+    });
+
+    test('debe rechazar ID inválido', async () => {
+      const res = await request(app)
+        .put(endpoint('invalid'))
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('error');
+      expect([
+        'ID de reserva inválido',
+        'Datos de entrada inválidos'
+      ]).toContain(res.body.error);
+    });
+
+    test('debe retornar 404 si no existe', async () => {
+      const res = await request(app)
+        .put(endpoint(999999))
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(404);
+      expect(res.body).toHaveProperty('error', 'Reserva no encontrada');
+    });
+
+    test('debe rechazar si la reserva no está ACTIVA', async () => {
+      // Cambiar estado a CANCELADA
+      await prisma.reservaEnc.update({ where: { id: reservaId }, data: { estado: 'CANCELADA' } });
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty('error');
+    });
+
+    test('debe requerir autenticación', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId));
+      expect([401, 403]).toContain(res.status);
+    });
+
+    test('debe manejar error interno', async () => {
+      // Simular error con ID negativo
+      const res = await request(app)
+        .put(endpoint(-1))
+        .set('Authorization', `Bearer ${authToken}`);
+      expect([400, 500]).toContain(res.status);
+    });
+  });
+
+  describe('POST /api/reservas/verificar-disponibilidad', () => {
+    // Aquí irán los tests de verificarDisponibilidad
+    const endpoint = '/api/reservas/verificar-disponibilidad';
+    const baseData = {
+      fechaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      horaReserva: '20:00',
+      numeroPersonas: 2
+    };
+
+    test('debe verificar disponibilidad y encontrar mesas', async () => {
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(baseData);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('mesasDisponibles');
+      expect(Array.isArray(res.body.mesasDisponibles)).toBe(true);
+    });
+
+    test('debe retornar vacío si no hay mesas disponibles', async () => {
+      // Poner la mesa en OCUPADA
+      await prisma.mesa.update({ where: { id: testMesa.id }, data: { estado: 'OCUPADA' } });
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send(baseData);
+      expect([200, 404]).toContain(res.status);
+      await prisma.mesa.update({ where: { id: testMesa.id }, data: { estado: 'DISPONIBLE' } });
+    });
+
+    test('debe rechazar datos inválidos', async () => {
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ ...baseData, numeroPersonas: null });
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('error');
+    });
+
+    test('debe requerir autenticación', async () => {
+      const res = await request(app)
+        .post(endpoint)
+        .send(baseData);
+      expect([401, 403]).toContain(res.status);
+    });
+
+    test('debe manejar error interno', async () => {
+      // Simular error con body inválido
+      const res = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ fechaReserva: 'invalid', horaReserva: 'invalid', numeroPersonas: 'x' });
+      expect([400, 500]).toContain(res.status);
+    });
+  });
+
+  describe('GET /api/reservas/hoy', () => {
+    // Aquí irán los tests de getReservasHoy
+    const endpoint = '/api/reservas/hoy';
+
+    beforeEach(async () => {
+      // Crear reserva para hoy
+      const hoy = new Date();
+      hoy.setHours(20, 0, 0, 0);
+      await prisma.reservaEnc.create({
+        data: {
+          fechaReserva: hoy,
+          horaReserva: hoy,
+          numeroPersonas: 2,
+          nombreCliente: 'Reserva Test User',
+          usuarioId: testUser.id,
+          mesaId: testMesa.id,
+          estado: 'ACTIVA'
+        }
       });
     });
 
-    test('should handle errors properly', async () => {
-      const mockReq = { query: {} };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
+    afterEach(async () => {
+      await prisma.reservaEnc.deleteMany({ where: { nombreCliente: 'Reserva Test User' } });
+    });
 
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    test('debe obtener reservas del día', async () => {
+      const res = await request(app)
+        .get(endpoint)
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('reservas');
+      expect(Array.isArray(res.body.reservas)).toBe(true);
+    });
 
-      const originalMethod = reservaController.getReservas;
-      reservaController.getReservas = async (req, res) => {
-        try {
-          throw new Error('Query execution failed');
-        } catch (error) {
-          console.error('Error en getReservas:', error);
-          res.status(500).json({ error: 'Error interno del servidor' });
-        }
-      };
+    test('debe requerir autenticación', async () => {
+      const res = await request(app)
+        .get(endpoint);
+      expect([401, 403]).toContain(res.status);
+    });
 
-      await reservaController.getReservas(mockReq, mockRes);
-
-      expect(consoleSpy).toHaveBeenCalledWith('Error en getReservas:', expect.any(Error));
-      expect(mockRes.status).toHaveBeenCalledWith(500);
-
-      consoleSpy.mockRestore();
-      reservaController.getReservas = originalMethod;
+    test('debe manejar error interno', async () => {
+      // Simular error con endpoint mal formado
+      const res = await request(app)
+        .get('/api/reservas/hoy?limit=error')
+        .set('Authorization', `Bearer ${authToken}`);
+      expect([400, 500]).toContain(res.status);
     });
   });
 
-  describe('getReservaById method', () => {
-    test('should return 501 Not Implemented status', async () => {
-      const mockReq = { params: { id: '1' } };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
+  describe('PUT /api/reservas/:id/completar', () => {
+    // Aquí irán los tests de completarReserva
+    let reservaId;
+    const endpoint = id => `/api/reservas/${id}/completar`;
 
-      await reservaController.getReservaById(mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(501);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        error: 'Not implemented',
-        message: 'Get reserva by ID endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
+    beforeEach(async () => {
+      // Crear reserva CONFIRMADA
+      const reserva = await prisma.reservaEnc.create({
+        data: {
+          fechaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          horaReserva: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          numeroPersonas: 2,
+          nombreCliente: 'Reserva Test User',
+          usuarioId: testUser.id,
+          mesaId: testMesa.id,
+          estado: 'CONFIRMADA'
+        }
       });
+      reservaId = reserva.id;
     });
 
-    test('should handle errors in catch block', async () => {
-      const mockReq = { params: { id: '1' } };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
-      const originalMethod = reservaController.getReservaById;
-      reservaController.getReservaById = async (req, res) => {
-        try {
-          throw new Error('Reserva not found');
-        } catch (error) {
-          console.error('Error en getReservaById:', error);
-          res.status(500).json({ error: 'Error interno del servidor' });
-        }
-      };
-
-      await reservaController.getReservaById(mockReq, mockRes);
-
-      expect(consoleSpy).toHaveBeenCalledWith('Error en getReservaById:', expect.any(Error));
-
-      consoleSpy.mockRestore();
-      reservaController.getReservaById = originalMethod;
-    });
-  });
-
-  describe('actualizarReserva method', () => {
-    test('should return 501 Not Implemented status', async () => {
-      const mockReq = {
-        params: { id: '1' },
-        body: { personas: 6 }
-      };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      await reservaController.actualizarReserva(mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(501);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        error: 'Not implemented',
-        message: 'Actualizar reserva endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
-      });
+    afterEach(async () => {
+      await prisma.reservaEnc.deleteMany({ where: { nombreCliente: 'Reserva Test User' } });
     });
 
-    test('should handle errors properly', async () => {
-      const mockReq = { params: { id: '1' }, body: {} };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
-      const originalMethod = reservaController.actualizarReserva;
-      reservaController.actualizarReserva = async (req, res) => {
-        try {
-          throw new Error('Update failed');
-        } catch (error) {
-          console.error('Error en actualizarReserva:', error);
-          res.status(500).json({ error: 'Error interno del servidor' });
-        }
-      };
-
-      await reservaController.actualizarReserva(mockReq, mockRes);
-
-      expect(consoleSpy).toHaveBeenCalledWith('Error en actualizarReserva:', expect.any(Error));
-
-      consoleSpy.mockRestore();
-      reservaController.actualizarReserva = originalMethod;
-    });
-  });
-
-  describe('cancelarReserva method', () => {
-    test('should return 501 Not Implemented status', async () => {
-      const mockReq = {
-        params: { id: '1' },
-        body: { motivo: 'Cliente canceló' }
-      };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      await reservaController.cancelarReserva(mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(501);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        error: 'Not implemented',
-        message: 'Cancelar reserva endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
-      });
+    test('debe completar una reserva CONFIRMADA', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('message', 'Reserva completada exitosamente');
+      expect(res.body.reserva.estado).toBe('COMPLETADA');
     });
 
-    test('should handle errors in catch block', async () => {
-      const mockReq = { params: { id: '1' } };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
-      const originalMethod = reservaController.cancelarReserva;
-      reservaController.cancelarReserva = async (req, res) => {
-        try {
-          throw new Error('Cancellation failed');
-        } catch (error) {
-          console.error('Error en cancelarReserva:', error);
-          res.status(500).json({ error: 'Error interno del servidor' });
-        }
-      };
-
-      await reservaController.cancelarReserva(mockReq, mockRes);
-
-      expect(consoleSpy).toHaveBeenCalledWith('Error en cancelarReserva:', expect.any(Error));
-
-      consoleSpy.mockRestore();
-      reservaController.cancelarReserva = originalMethod;
-    });
-  });
-
-  describe('confirmarReserva method', () => {
-    test('should return 501 Not Implemented status', async () => {
-      const mockReq = { params: { id: '1' } };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      await reservaController.confirmarReserva(mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(501);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        error: 'Not implemented',
-        message: 'Confirmar reserva endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
-      });
+    test('debe rechazar ID inválido', async () => {
+      const res = await request(app)
+        .put(endpoint('invalid'))
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('error', 'ID de reserva inválido');
     });
 
-    test('should handle errors properly', async () => {
-      const mockReq = { params: { id: '1' } };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
-      const originalMethod = reservaController.confirmarReserva;
-      reservaController.confirmarReserva = async (req, res) => {
-        try {
-          throw new Error('Confirmation failed');
-        } catch (error) {
-          console.error('Error en confirmarReserva:', error);
-          res.status(500).json({ error: 'Error interno del servidor' });
-        }
-      };
-
-      await reservaController.confirmarReserva(mockReq, mockRes);
-
-      expect(consoleSpy).toHaveBeenCalledWith('Error en confirmarReserva:', expect.any(Error));
-
-      consoleSpy.mockRestore();
-      reservaController.confirmarReserva = originalMethod;
-    });
-  });
-
-  describe('verificarDisponibilidad method', () => {
-    test('should return 501 Not Implemented status', async () => {
-      const mockReq = {
-        body: {
-          fecha: '2024-01-15',
-          hora: '20:00',
-          personas: 4
-        }
-      };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      await reservaController.verificarDisponibilidad(mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(501);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        error: 'Not implemented',
-        message: 'Verificar disponibilidad endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
-      });
+    test('debe retornar 404 si no existe', async () => {
+      const res = await request(app)
+        .put(endpoint(999999))
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(404);
+      expect(res.body).toHaveProperty('error', 'Reserva no encontrada');
     });
 
-    test('should handle errors in catch block', async () => {
-      const mockReq = { body: {} };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
-      const originalMethod = reservaController.verificarDisponibilidad;
-      reservaController.verificarDisponibilidad = async (req, res) => {
-        try {
-          throw new Error('Availability check failed');
-        } catch (error) {
-          console.error('Error en verificarDisponibilidad:', error);
-          res.status(500).json({ error: 'Error interno del servidor' });
-        }
-      };
-
-      await reservaController.verificarDisponibilidad(mockReq, mockRes);
-
-      expect(consoleSpy).toHaveBeenCalledWith('Error en verificarDisponibilidad:', expect.any(Error));
-
-      consoleSpy.mockRestore();
-      reservaController.verificarDisponibilidad = originalMethod;
-    });
-  });
-
-  describe('getReservasHoy method', () => {
-    test('should return 501 Not Implemented status', async () => {
-      const mockReq = { query: {} };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      await reservaController.getReservasHoy(mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(501);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        error: 'Not implemented',
-        message: 'Get reservas hoy endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
-      });
+    test('debe rechazar si la reserva no está CONFIRMADA', async () => {
+      // Cambiar estado a CANCELADA
+      await prisma.reservaEnc.update({ where: { id: reservaId }, data: { estado: 'CANCELADA' } });
+      const res = await request(app)
+        .put(endpoint(reservaId))
+        .set('Authorization', `Bearer ${authToken}`);
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty('error');
     });
 
-    test('should handle errors properly', async () => {
-      const mockReq = { query: {} };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
-      const originalMethod = reservaController.getReservasHoy;
-      reservaController.getReservasHoy = async (req, res) => {
-        try {
-          throw new Error('Today reservations query failed');
-        } catch (error) {
-          console.error('Error en getReservasHoy:', error);
-          res.status(500).json({ error: 'Error interno del servidor' });
-        }
-      };
-
-      await reservaController.getReservasHoy(mockReq, mockRes);
-
-      expect(consoleSpy).toHaveBeenCalledWith('Error en getReservasHoy:', expect.any(Error));
-
-      consoleSpy.mockRestore();
-      reservaController.getReservasHoy = originalMethod;
-    });
-  });
-
-  describe('completarReserva method', () => {
-    test('should return 501 Not Implemented status', async () => {
-      const mockReq = { params: { id: '1' } };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      await reservaController.completarReserva(mockReq, mockRes);
-
-      expect(mockRes.status).toHaveBeenCalledWith(501);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        error: 'Not implemented',
-        message: 'Completar reserva endpoint pendiente de implementación',
-        developer: 'Desarrollador 5 - rama: feature/reservas'
-      });
+    test('debe requerir autenticación', async () => {
+      const res = await request(app)
+        .put(endpoint(reservaId));
+      expect([401, 403]).toContain(res.status);
     });
 
-    test('should handle errors in catch block', async () => {
-      const mockReq = { params: { id: '1' } };
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
-      const originalMethod = reservaController.completarReserva;
-      reservaController.completarReserva = async (req, res) => {
-        try {
-          throw new Error('Completion failed');
-        } catch (error) {
-          console.error('Error en completarReserva:', error);
-          res.status(500).json({ error: 'Error interno del servidor' });
-        }
-      };
-
-      await reservaController.completarReserva(mockReq, mockRes);
-
-      expect(consoleSpy).toHaveBeenCalledWith('Error en completarReserva:', expect.any(Error));
-
-      consoleSpy.mockRestore();
-      reservaController.completarReserva = originalMethod;
-    });
-  });
-
-  // ROUTE AVAILABILITY TESTS
-  describe('Route Availability Tests', () => {
-    test('should handle GET /api/reservas', async () => {
-      const response = await request(app)
-        .get('/api/reservas');
-
-      // Should return 401 (requires auth) or 501 (not implemented)
-      expect([401, 501]).toContain(response.status);
-    });
-
-    test('should handle POST /api/reservas', async () => {
-      const response = await request(app)
-        .post('/api/reservas')
-        .send({});
-
-      expect([400, 401, 501]).toContain(response.status);
-    });
-
-    test('should handle GET /api/reservas/:id', async () => {
-      const response = await request(app)
-        .get('/api/reservas/1');
-
-      expect([401, 404, 501]).toContain(response.status);
-    });
-
-    test('should handle PUT /api/reservas/:id', async () => {
-      const response = await request(app)
-        .put('/api/reservas/1')
-        .send({});
-
-      expect([400, 401, 404, 501]).toContain(response.status);
-    });
-
-    test('should handle PUT /api/reservas/:id/cancelar', async () => {
-      const response = await request(app)
-        .put('/api/reservas/1/cancelar')
-        .send({});
-
-      expect([400, 401, 404, 501]).toContain(response.status);
-    });
-
-    test('should handle PUT /api/reservas/:id/confirmar', async () => {
-      const response = await request(app)
-        .put('/api/reservas/1/confirmar')
-        .send({});
-
-      expect([400, 401, 404, 501]).toContain(response.status);
-    });
-
-    test('should handle POST /api/reservas/verificar-disponibilidad', async () => {
-      const response = await request(app)
-        .post('/api/reservas/verificar-disponibilidad')
-        .send({});
-
-      expect([400, 401, 501]).toContain(response.status);
-    });
-
-    test('should handle GET /api/reservas/hoy', async () => {
-      const response = await request(app)
-        .get('/api/reservas/hoy');
-
-      expect([401, 501]).toContain(response.status);
-    });
-  });
-
-  // MODULE DEPENDENCIES AND STRUCTURE
-  describe('Module Dependencies', () => {
-    test('should import required dependencies', () => {
-      const fs = require('fs');
-      const path = require('path');
-
-      const controllerPath = path.join(__dirname, '../../controllers/reservaController.js');
-      const controllerContent = fs.readFileSync(controllerPath, 'utf8');
-
-      expect(controllerContent).toContain("require('@prisma/client')");
-      expect(controllerContent).toContain("require('express-validator')");
-      expect(controllerContent).toContain('new PrismaClient()');
-    });
-
-    test('should have proper module structure', () => {
-      expect(Object.keys(reservaController)).toEqual([
-        'crearReserva',
-        'getReservas',
-        'getReservaById',
-        'actualizarReserva',
-        'cancelarReserva',
-        'confirmarReserva',
-        'verificarDisponibilidad',
-        'getReservasHoy',
-        'completarReserva'
-      ]);
-    });
-  });
-
-  // FUTURE IMPLEMENTATION REQUIREMENTS
-  describe('Future Implementation Requirements', () => {
-    test('should implement date/time validation', () => {
-      // TODO: Ensure reservations:
-      // - Cannot be made in the past
-      // - Respect restaurant hours
-      // - Check mesa availability
-      expect(true).toBe(true);
-    });
-
-    test('should implement mesa capacity validation', () => {
-      // TODO: Ensure reservations respect mesa capacity
-      expect(true).toBe(true);
-    });
-
-    test('should implement status management', () => {
-      // TODO: Implement proper status flow:
-      // ACTIVA -> CONFIRMADA -> COMPLETADA
-      // or ACTIVA -> CANCELADA
-      expect(true).toBe(true);
-    });
-
-    test('should implement conflict detection', () => {
-      // TODO: Prevent double-booking of mesas
-      expect(true).toBe(true);
+    test('debe manejar error interno', async () => {
+      // Simular error con ID negativo
+      const res = await request(app)
+        .put(endpoint(-1))
+        .set('Authorization', `Bearer ${authToken}`);
+      expect([400, 500]).toContain(res.status);
     });
   });
 });

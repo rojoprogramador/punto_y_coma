@@ -19,7 +19,7 @@ describe('Factura Controller Tests - Basic Structure', () => {
       const response = await request(app)
         .get('/api/facturas/nonexistent');
 
-      // Should return 401 (auth required), 404, or 501 (not implemented)
+      // Should return 401 (auth required), 404 or 501 (not implemented)
       expect([401, 404, 501]).toContain(response.status);
     });
   });

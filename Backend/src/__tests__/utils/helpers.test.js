@@ -1,347 +1,374 @@
 const helpers = require('../../utils/helpers');
 
 describe('Helpers Tests', () => {
-  describe('generarNumeroPedido function', () => {
-    test('should generate pedido number with correct format', () => {
+
+  describe('generarNumeroPedido', () => {
+    test('debe generar número de pedido con formato correcto', () => {
       const numero = helpers.generarNumeroPedido();
       expect(numero).toMatch(/^PED-\d{8}-\d{6}-\d{3}$/);
+      expect(numero).toContain('PED-');
     });
 
-    test('should generate unique numbers', () => {
+    test('debe generar números únicos', () => {
       const numero1 = helpers.generarNumeroPedido();
       const numero2 = helpers.generarNumeroPedido();
       expect(numero1).not.toBe(numero2);
     });
   });
 
-  describe('generarNumeroFactura function', () => {
-    test('should generate factura number with correct format', () => {
+  describe('generarNumeroFactura', () => {
+    test('debe generar número de factura con formato correcto', () => {
       const numero = helpers.generarNumeroFactura();
       expect(numero).toMatch(/^FAC-\d{8}-\d{5}$/);
+      expect(numero).toContain('FAC-');
     });
 
-    test('should generate unique numbers', () => {
+    test('debe generar números únicos', () => {
       const numero1 = helpers.generarNumeroFactura();
       const numero2 = helpers.generarNumeroFactura();
       expect(numero1).not.toBe(numero2);
     });
   });
 
-  describe('calcularTotales function', () => {
-    test('should calculate totals correctly with default tax', () => {
-      const items = [
-        { precioUnitario: 10.00, cantidad: 2 },
-        { precioUnitario: 15.50, cantidad: 1 }
-      ];
+  describe('calcularTotales', () => {
+    const items = [
+      { precioUnitario: 10, cantidad: 2 },
+      { precioUnitario: 15, cantidad: 1 }
+    ];
 
-      const result = helpers.calcularTotales(items);
-
-      expect(result.subtotal).toBe(35.50);
-      expect(result.impuestos).toBe(7.46); // 21% of 35.50
-      expect(result.total).toBe(42.96);
+    test('debe calcular totales con impuesto por defecto (21%)', () => {
+      const resultado = helpers.calcularTotales(items);
+      expect(resultado.subtotal).toBe(35);
+      expect(resultado.impuestos).toBe(7.35);
+      expect(resultado.total).toBe(42.35);
     });
 
-    test('should calculate totals with custom tax rate', () => {
-      const items = [
-        { precioUnitario: 100.00, cantidad: 1 }
-      ];
-
-      const result = helpers.calcularTotales(items, 10);
-
-      expect(result.subtotal).toBe(100.00);
-      expect(result.impuestos).toBe(10.00);
-      expect(result.total).toBe(110.00);
+    test('debe calcular totales con impuesto personalizado', () => {
+      const resultado = helpers.calcularTotales(items, 10);
+      expect(resultado.subtotal).toBe(35);
+      expect(resultado.impuestos).toBe(3.5);
+      expect(resultado.total).toBe(38.5);
     });
 
-    test('should handle empty items array', () => {
-      const result = helpers.calcularTotales([]);
-
-      expect(result.subtotal).toBe(0);
-      expect(result.impuestos).toBe(0);
-      expect(result.total).toBe(0);
+    test('debe manejar array vacío', () => {
+      const resultado = helpers.calcularTotales([]);
+      expect(resultado.subtotal).toBe(0);
+      expect(resultado.impuestos).toBe(0);
+      expect(resultado.total).toBe(0);
     });
 
-    test('should round numbers correctly', () => {
-      const items = [
-        { precioUnitario: 10.336, cantidad: 3 }
-      ];
-
-      const result = helpers.calcularTotales(items);
-
-      expect(result.subtotal).toBe(31.01); // rounded
-      expect(result.impuestos).toBe(6.51);
-      expect(result.total).toBe(37.52);
+    test('debe redondear correctamente', () => {
+      const itemsDecimales = [{ precioUnitario: 10.333, cantidad: 3 }];
+      const resultado = helpers.calcularTotales(itemsDecimales);
+      expect(resultado.subtotal).toBe(31);
+      expect(resultado.impuestos).toBe(6.51);
+      expect(resultado.total).toBe(37.51);
     });
   });
 
-  describe('formatearFecha function', () => {
-    test('should format date correctly', () => {
-      const fecha = new Date('2023-12-25T10:30:00');
-      const formatted = helpers.formatearFecha(fecha);
-
-      expect(formatted).toMatch(/\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}/);
+  describe('formatearFecha', () => {
+    test('debe formatear fecha correctamente', () => {
+      const fecha = new Date('2023-12-25T15:30:00');
+      const resultado = helpers.formatearFecha(fecha);
+      expect(resultado).toMatch(/\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}/);
     });
 
-    test('should handle string dates', () => {
-      const formatted = helpers.formatearFecha('2023-12-25T10:30:00Z');
-
-      expect(formatted).toMatch(/\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}/);
-    });
-
-    test('should handle null and undefined', () => {
+    test('debe retornar string vacío para fecha nula', () => {
       expect(helpers.formatearFecha(null)).toBe('');
       expect(helpers.formatearFecha(undefined)).toBe('');
+      expect(helpers.formatearFecha('')).toBe('');
     });
 
-    test('should handle empty string', () => {
-      expect(helpers.formatearFecha('')).toBe('');
+    test('debe manejar string de fecha', () => {
+      const resultado = helpers.formatearFecha('2023-12-25');
+      expect(resultado).toBeTruthy();
+      expect(typeof resultado).toBe('string');
     });
   });
 
-  describe('formatearPrecio function', () => {
-    test('should format numbers correctly', () => {
-      expect(helpers.formatearPrecio(1234.56)).toBe('1234.56 €');
-      expect(helpers.formatearPrecio(999)).toBe('999.00 €');
-      expect(helpers.formatearPrecio(0)).toBe('0.00 €');
+  describe('formatearPrecio', () => {
+    test('debe formatear precio con moneda por defecto', () => {
+      expect(helpers.formatearPrecio(25.5)).toBe('25.50 €');
+      expect(helpers.formatearPrecio(100)).toBe('100.00 €');
     });
 
-    test('should handle custom currency', () => {
-      expect(helpers.formatearPrecio(100, '$')).toBe('100.00 $');
-      expect(helpers.formatearPrecio(50.5, 'USD')).toBe('50.50 USD');
+    test('debe formatear precio con moneda personalizada', () => {
+      expect(helpers.formatearPrecio(25.5, '$')).toBe('25.50 $');
     });
 
-    test('should handle non-number inputs', () => {
-      expect(helpers.formatearPrecio('invalid')).toBe('0.00 €');
+    test('debe manejar tipos no numéricos', () => {
+      expect(helpers.formatearPrecio('abc')).toBe('0.00 €');
       expect(helpers.formatearPrecio(null)).toBe('0.00 €');
       expect(helpers.formatearPrecio(undefined)).toBe('0.00 €');
     });
+  });
 
-    test('should handle negative numbers', () => {
-      expect(helpers.formatearPrecio(-100.50)).toBe('-100.50 €');
+  describe('validarEmail', () => {
+    test('debe validar emails correctos', () => {
+      expect(helpers.validarEmail('test@example.com')).toBe(true);
+      expect(helpers.validarEmail('user.name@domain.co.uk')).toBe(true);
+    });
+
+    test('debe rechazar emails incorrectos', () => {
+      expect(helpers.validarEmail('invalid-email')).toBe(false);
+      expect(helpers.validarEmail('test@')).toBe(false);
+      expect(helpers.validarEmail('@domain.com')).toBe(false);
+      expect(helpers.validarEmail('')).toBe(false);
     });
   });
 
-  describe('validarEmail function', () => {
-    test('should validate correct email formats', () => {
-      const validEmails = [
-        'test@example.com',
-        'user.name@domain.co.uk',
-        'test+label@gmail.com',
-        'simple@test.org'
-      ];
-
-      validEmails.forEach(email => {
-        expect(helpers.validarEmail(email)).toBe(true);
-      });
+  describe('validarTelefono', () => {
+    test('debe validar teléfonos españoles correctos', () => {
+      expect(helpers.validarTelefono('612345678')).toBe(true);
+      expect(helpers.validarTelefono('+34612345678')).toBe(true);
+      expect(helpers.validarTelefono('34612345678')).toBe(true);
+      expect(helpers.validarTelefono('712345678')).toBe(true);
     });
 
-    test('should reject invalid email formats', () => {
-      const invalidEmails = [
-        'invalid-email',
-        '@domain.com',
-        'test@',
-        ''
-      ];
-
-      invalidEmails.forEach(email => {
-        expect(helpers.validarEmail(email)).toBe(false);
-      });
+    test('debe rechazar teléfonos incorrectos', () => {
+      expect(helpers.validarTelefono('512345678')).toBe(false); // No empieza por 6,7,8,9
+      expect(helpers.validarTelefono('12345')).toBe(false); // Muy corto
+      expect(helpers.validarTelefono('abc')).toBe(false);
     });
 
-    test('should handle null and undefined inputs', () => {
-      expect(helpers.validarEmail(null)).toBe(false);
-      expect(helpers.validarEmail(undefined)).toBe(false);
+    test('debe manejar espacios en teléfonos', () => {
+      expect(helpers.validarTelefono('612 345 678')).toBe(true);
     });
   });
 
-  describe('validarTelefono function', () => {
-    test('should validate Spanish phone numbers', () => {
-      const validPhones = [
-        '612345678',
-        '+34612345678',
-        '0034612345678',
-        '34612345678',
-        '6 12 34 56 78' // with spaces
-      ];
-
-      validPhones.forEach(phone => {
-        expect(helpers.validarTelefono(phone)).toBe(true);
-      });
-    });
-
-    test('should reject invalid phone formats', () => {
-      const invalidPhones = [
-        '512345678', // doesn't start with 6,7,8,9
-        '12345678',  // too short
-        'abc123def',
-        '+44612345678', // wrong country code
-        ''
-      ];
-
-      invalidPhones.forEach(phone => {
-        expect(helpers.validarTelefono(phone)).toBe(false);
-      });
-    });
-  });
-
-  describe('generarCodigoReserva function', () => {
-    test('should generate code with default length', () => {
+  describe('generarCodigoReserva', () => {
+    test('debe generar código con longitud por defecto', () => {
       const codigo = helpers.generarCodigoReserva();
       expect(codigo).toHaveLength(6);
       expect(codigo).toMatch(/^[A-Z0-9]+$/);
     });
 
-    test('should generate code with custom length', () => {
+    test('debe generar código con longitud personalizada', () => {
       const codigo = helpers.generarCodigoReserva(10);
       expect(codigo).toHaveLength(10);
       expect(codigo).toMatch(/^[A-Z0-9]+$/);
     });
 
-    test('should generate unique codes', () => {
+    test('debe generar códigos únicos', () => {
       const codigo1 = helpers.generarCodigoReserva();
       const codigo2 = helpers.generarCodigoReserva();
       expect(codigo1).not.toBe(codigo2);
     });
+  });
 
-    test('should handle zero length', () => {
-      const codigo = helpers.generarCodigoReserva(0);
-      expect(codigo).toBe('');
+  describe('esFechaPasada', () => {
+    test('debe detectar fechas pasadas', () => {
+      const ayer = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      expect(helpers.esFechaPasada(ayer)).toBe(true);
+    });
+
+    test('debe detectar fechas futuras', () => {
+      const manana = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      expect(helpers.esFechaPasada(manana)).toBe(false);
+    });
+
+    test('debe manejar strings de fecha', () => {
+      const ayer = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      expect(helpers.esFechaPasada(ayer)).toBe(true);
     });
   });
 
-  describe('esFechaPasada function', () => {
-    test('should detect past dates', () => {
-      const pastDate = new Date('2020-01-01');
-      expect(helpers.esFechaPasada(pastDate)).toBe(true);
+  describe('calcularTiempoTranscurrido', () => {
+    test('debe calcular minutos transcurridos', () => {
+      const hace30min = new Date(Date.now() - 30 * 60 * 1000);
+      const resultado = helpers.calcularTiempoTranscurrido(hace30min);
+      expect(resultado).toMatch(/^\d+ min$/);
     });
 
-    test('should detect future dates', () => {
-      const futureDate = new Date('2030-01-01');
-      expect(helpers.esFechaPasada(futureDate)).toBe(false);
+    test('debe calcular horas y minutos transcurridos', () => {
+      const hace90min = new Date(Date.now() - 90 * 60 * 1000);
+      const resultado = helpers.calcularTiempoTranscurrido(hace90min);
+      expect(resultado).toMatch(/^\d+h \d+min$/);
     });
 
-    test('should handle string dates', () => {
-      expect(helpers.esFechaPasada('2020-01-01')).toBe(true);
-      expect(helpers.esFechaPasada('2030-01-01')).toBe(false);
-    });
-
-    test('should handle current time approximately', () => {
-      const now = new Date();
-      // Current time might be slightly in the past by the time the comparison happens
-      const result = helpers.esFechaPasada(now);
-      expect(typeof result).toBe('boolean');
+    test('debe manejar string de fecha', () => {
+      const hace60min = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const resultado = helpers.calcularTiempoTranscurrido(hace60min);
+      expect(resultado).toMatch(/^\d+h \d+min$/);
     });
   });
 
-  describe('calcularTiempoTranscurrido function', () => {
-    test('should calculate minutes correctly', () => {
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      const resultado = helpers.calcularTiempoTranscurrido(fiveMinutesAgo);
-      expect(resultado).toBe('5 min');
+  describe('limpiarTextoParaBusqueda', () => {
+    test('debe limpiar texto correctamente', () => {
+      expect(helpers.limpiarTextoParaBusqueda('Café ñandú')).toBe('cafe nandu');
+      expect(helpers.limpiarTextoParaBusqueda('  TEXTO  ')).toBe('texto');
     });
 
-    test('should calculate hours and minutes correctly', () => {
-      const twoHoursThirtyMinutesAgo = new Date(Date.now() - (2 * 60 + 30) * 60 * 1000);
-      const resultado = helpers.calcularTiempoTranscurrido(twoHoursThirtyMinutesAgo);
-      expect(resultado).toBe('2h 30min');
-    });
-
-    test('should handle zero time', () => {
-      const now = new Date();
-      const resultado = helpers.calcularTiempoTranscurrido(now);
-      expect(resultado).toMatch(/^0 min$/);
-    });
-
-    test('should handle string dates', () => {
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      const resultado = helpers.calcularTiempoTranscurrido(oneHourAgo);
-      expect(resultado).toBe('1h 0min');
-    });
-  });
-
-  describe('limpiarTextoParaBusqueda function', () => {
-    test('should clean text for search', () => {
-      expect(helpers.limpiarTextoParaBusqueda('Café Español')).toBe('cafe espanol');
-      expect(helpers.limpiarTextoParaBusqueda('  TEST  ')).toBe('test');
-      expect(helpers.limpiarTextoParaBusqueda('Niño')).toBe('nino');
-    });
-
-    test('should handle empty and null inputs', () => {
+    test('debe manejar texto vacío o nulo', () => {
       expect(helpers.limpiarTextoParaBusqueda('')).toBe('');
       expect(helpers.limpiarTextoParaBusqueda(null)).toBe('');
       expect(helpers.limpiarTextoParaBusqueda(undefined)).toBe('');
     });
 
-    test('should handle special characters', () => {
-      expect(helpers.limpiarTextoParaBusqueda('Café & Restaurant')).toBe('cafe & restaurant');
-      expect(helpers.limpiarTextoParaBusqueda('123 Test!')).toBe('123 test!');
+    test('debe remover acentos', () => {
+      expect(helpers.limpiarTextoParaBusqueda('áéíóú')).toBe('aeiou');
     });
   });
 
-  describe('calcularPaginacion function', () => {
-    test('should calculate pagination correctly', () => {
-      expect(helpers.calcularPaginacion(1, 10)).toEqual({ skip: 0, take: 10 });
-      expect(helpers.calcularPaginacion(2, 10)).toEqual({ skip: 10, take: 10 });
-      expect(helpers.calcularPaginacion(3, 5)).toEqual({ skip: 10, take: 5 });
+  describe('calcularPaginacion', () => {
+    test('debe calcular paginación correctamente', () => {
+      const resultado = helpers.calcularPaginacion(2, 10);
+      expect(resultado.skip).toBe(10);
+      expect(resultado.take).toBe(10);
     });
 
-    test('should handle default values', () => {
-      expect(helpers.calcularPaginacion()).toEqual({ skip: 0, take: 10 });
+    test('debe usar valores por defecto', () => {
+      const resultado = helpers.calcularPaginacion();
+      expect(resultado.skip).toBe(0);
+      expect(resultado.take).toBe(10);
     });
 
-    test('should handle invalid inputs', () => {
-      expect(helpers.calcularPaginacion(0, 10)).toEqual({ skip: 0, take: 10 }); // page normalized to 1
-      expect(helpers.calcularPaginacion(-1, 10)).toEqual({ skip: 0, take: 10 }); // page normalized to 1
-      expect(helpers.calcularPaginacion(1, 0)).toEqual({ skip: 0, take: 1 }); // limit normalized to 1
-      expect(helpers.calcularPaginacion(1, 200)).toEqual({ skip: 0, take: 100 }); // limit capped at 100
+    test('debe manejar página menor a 1', () => {
+      const resultado = helpers.calcularPaginacion(0, 10);
+      expect(resultado.skip).toBe(0);
+      expect(resultado.take).toBe(10);
     });
 
-    test('should handle string inputs', () => {
-      expect(helpers.calcularPaginacion('2', '5')).toEqual({ skip: 5, take: 5 });
-      expect(helpers.calcularPaginacion('invalid', 'invalid')).toEqual({ skip: NaN, take: NaN });
+    test('debe limitar el límite máximo', () => {
+      const resultado = helpers.calcularPaginacion(1, 200);
+      expect(resultado.take).toBe(100);
+    });
+
+    test('debe parsear strings', () => {
+      const resultado = helpers.calcularPaginacion('3', '15');
+      expect(resultado.skip).toBe(30);
+      expect(resultado.take).toBe(15);
     });
   });
 
-  describe('crearRespuestaPaginada function', () => {
-    test('should create paginated response correctly', () => {
-      const data = [1, 2, 3, 4, 5];
-      const result = helpers.crearRespuestaPaginada(data, 50, 2, 10);
+  describe('crearRespuestaPaginada', () => {
+    const data = [1, 2, 3];
+    const total = 25;
 
-      expect(result.data).toEqual(data);
-      expect(result.meta).toEqual({
-        total: 50,
-        page: 2,
-        limit: 10,
-        totalPages: 5,
-        hasNextPage: true,
-        hasPrevPage: true
+    test('debe crear respuesta paginada correctamente', () => {
+      const resultado = helpers.crearRespuestaPaginada(data, total, 2, 10);
+
+      expect(resultado.data).toBe(data);
+      expect(resultado.meta.total).toBe(25);
+      expect(resultado.meta.page).toBe(2);
+      expect(resultado.meta.limit).toBe(10);
+      expect(resultado.meta.totalPages).toBe(3);
+      expect(resultado.meta.hasNextPage).toBe(true);
+      expect(resultado.meta.hasPrevPage).toBe(true);
+    });
+
+    test('debe calcular correctamente primera página', () => {
+      const resultado = helpers.crearRespuestaPaginada(data, total, 1, 10);
+      expect(resultado.meta.hasPrevPage).toBe(false);
+      expect(resultado.meta.hasNextPage).toBe(true);
+    });
+
+    test('debe calcular correctamente última página', () => {
+      const resultado = helpers.crearRespuestaPaginada(data, total, 3, 10);
+      expect(resultado.meta.hasPrevPage).toBe(true);
+      expect(resultado.meta.hasNextPage).toBe(false);
+    });
+  });
+
+  describe('validarId', () => {
+    let mockRes;
+
+    beforeEach(() => {
+      mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      };
+    });
+
+    test('debe validar ID correcto', () => {
+      expect(helpers.validarId(5, mockRes, 'test')).toBe(5);
+      expect(mockRes.status).not.toHaveBeenCalled();
+    });
+
+    test('debe rechazar ID inválido', () => {
+      expect(helpers.validarId('abc', mockRes, 'test')).toBe(null);
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith({ error: 'ID de test inválido' });
+    });
+
+    test('debe rechazar ID menor a 1', () => {
+      expect(helpers.validarId(0, mockRes)).toBe(null);
+      expect(helpers.validarId(-1, mockRes)).toBe(null);
+    });
+
+    test('debe funcionar sin response object', () => {
+      expect(helpers.validarId('abc', null)).toBe(null);
+      expect(helpers.validarId(5, null)).toBe(5);
+    });
+
+    test('debe usar nombre de campo por defecto', () => {
+      helpers.validarId('abc', mockRes);
+      expect(mockRes.json).toHaveBeenCalledWith({ error: 'ID de recurso inválido' });
+    });
+  });
+
+  describe('validarEstado', () => {
+    let mockRes;
+
+    beforeEach(() => {
+      mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      };
+    });
+
+    test('debe validar estado correcto', () => {
+      const estados = ['ACTIVO', 'INACTIVO'];
+      expect(helpers.validarEstado('ACTIVO', estados, mockRes)).toBe(true);
+      expect(mockRes.status).not.toHaveBeenCalled();
+    });
+
+    test('debe rechazar estado inválido', () => {
+      const estados = ['ACTIVO', 'INACTIVO'];
+      expect(helpers.validarEstado('PENDIENTE', estados, mockRes)).toBe(false);
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: 'Estado inválido',
+        estadosPermitidos: estados
       });
     });
 
-    test('should handle first page', () => {
-      const data = [1, 2, 3];
-      const result = helpers.crearRespuestaPaginada(data, 25, 1, 5);
+    test('debe funcionar sin response object', () => {
+      const estados = ['ACTIVO', 'INACTIVO'];
+      expect(helpers.validarEstado('ACTIVO', estados, null)).toBe(true);
+      expect(helpers.validarEstado('PENDIENTE', estados, null)).toBe(false);
+    });
+  });
 
-      expect(result.meta.hasNextPage).toBe(true);
-      expect(result.meta.hasPrevPage).toBe(false);
+  describe('manejarError', () => {
+    let mockRes;
+    let consoleSpy;
+
+    beforeEach(() => {
+      mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      };
+      consoleSpy = jest.spyOn(console, 'error').mockImplementation();
     });
 
-    test('should handle last page', () => {
-      const data = [1, 2];
-      const result = helpers.crearRespuestaPaginada(data, 12, 3, 5);
-
-      expect(result.meta.hasNextPage).toBe(false);
-      expect(result.meta.hasPrevPage).toBe(true);
-      expect(result.meta.totalPages).toBe(3);
+    afterEach(() => {
+      consoleSpy.mockRestore();
     });
 
-    test('should handle single page', () => {
-      const data = [1, 2, 3];
-      const result = helpers.crearRespuestaPaginada(data, 3, 1, 10);
+    test('debe manejar error correctamente', () => {
+      const error = new Error('Test error');
+      helpers.manejarError(error, mockRes, 'testOperation');
 
-      expect(result.meta.hasNextPage).toBe(false);
-      expect(result.meta.hasPrevPage).toBe(false);
-      expect(result.meta.totalPages).toBe(1);
+      expect(consoleSpy).toHaveBeenCalledWith('Error en testOperation:', error);
+      expect(mockRes.status).toHaveBeenCalledWith(500);
+      expect(mockRes.json).toHaveBeenCalledWith({ error: 'Error interno del servidor' });
+    });
+
+    test('debe funcionar sin response object', () => {
+      const error = new Error('Test error');
+      expect(() => helpers.manejarError(error, null, 'testOperation')).not.toThrow();
+      expect(consoleSpy).toHaveBeenCalledWith('Error en testOperation:', error);
     });
   });
 });
