@@ -218,4 +218,55 @@ module.exports = {
   limpiarTextoParaBusqueda,
   calcularPaginacion,
   crearRespuestaPaginada
+  ,
+  /**
+   * Validar y parsear un ID numérico
+   * @param {string|number} id - ID a validar
+   * @param {object} res - response de Express
+   * @param {string} fieldName - nombre del campo (opcional)
+   * @returns {number|null} - ID parseado o null si inválido
+   */
+  validarId: (id, res, fieldName = 'recurso') => {
+    const parsedId = parseInt(id);
+    if (isNaN(parsedId) || parsedId < 1) {
+      if (res) {
+        res.status(400).json({ error: `ID de ${fieldName} inválido` });
+      }
+      return null;
+    }
+    return parsedId;
+  },
+
+  /**
+   * Validar estado permitido
+   * @param {string} estado - Estado a validar
+   * @param {string[]} estadosValidos - Array de estados válidos
+   * @param {object} res - response de Express
+   * @returns {boolean} - true si es válido, false si no
+   */
+  validarEstado: (estado, estadosValidos, res) => {
+    if (!estadosValidos.includes(estado)) {
+      if (res) {
+        res.status(400).json({
+          error: 'Estado inválido',
+          estadosPermitidos: estadosValidos
+        });
+      }
+      return false;
+    }
+    return true;
+  },
+
+  /**
+   * Manejo de errores estándar para controladores
+   * @param {Error} error - Error capturado
+   * @param {object} res - response de Express
+   * @param {string} operacion - Nombre de la operación
+   */
+  manejarError: (error, res, operacion) => {
+    console.error(`Error en ${operacion}:`, error);
+    if (res) {
+      res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  }
 };
