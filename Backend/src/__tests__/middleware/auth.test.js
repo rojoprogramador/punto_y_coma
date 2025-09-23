@@ -268,4 +268,181 @@ describe('Auth Middleware Tests', () => {
       expect(authMiddleware.requireAuth).toBe(authMiddleware.verifyToken);
     });
   });
+
+  describe('Edge Cases and Additional Coverage', () => {
+    test('verifyToken should handle malformed JWT token', async () => {
+      mockReq.headers.authorization = 'Bearer malformed.jwt.token';
+
+      await authMiddleware.verifyToken(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(401);
+      expect(mockRes.json).toHaveBeenCalledWith({ error: 'Token inválido' });
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    test('optionalAuth should handle malformed JWT token gracefully', async () => {
+      mockReq.headers.authorization = 'Bearer malformed.jwt.token';
+
+      await authMiddleware.optionalAuth(mockReq, mockRes, mockNext);
+
+      expect(mockReq.user).toBeNull();
+      expect(mockNext).toHaveBeenCalled();
+    });
+
+    test('verifyToken should handle expired JWT token', async () => {
+      const expiredToken = jwt.sign(
+        { id: 1 },
+        process.env.JWT_SECRET || 'tu-secreto-jwt-aqui',
+        { expiresIn: '-1h' } // Expired 1 hour ago
+      );
+      mockReq.headers.authorization = `Bearer ${expiredToken}`;
+
+      await authMiddleware.verifyToken(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(401);
+      expect(mockRes.json).toHaveBeenCalledWith({ error: 'Token expirado' });
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    test('requireRole should handle user with undefined rol', () => {
+      mockReq.user = {
+        id: 1,
+        rol: undefined
+      };
+
+      const middleware = authMiddleware.requireRole(['ADMIN']);
+
+      middleware(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(403);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: 'No tiene permisos para realizar esta acción',
+        rolRequerido: ['ADMIN'],
+        rolActual: undefined
+      });
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    test('requireRole should handle user with null rol', () => {
+      mockReq.user = {
+        id: 1,
+        rol: null
+      };
+
+      const middleware = authMiddleware.requireRole(['ADMIN']);
+
+      middleware(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(403);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: 'No tiene permisos para realizar esta acción',
+        rolRequerido: ['ADMIN'],
+        rolActual: null
+      });
+    });
+
+    test('requireRole should work with multiple roles', () => {
+      mockReq.user = {
+        id: 1,
+        rol: 'MESERO'
+      };
+
+      const middleware = authMiddleware.requireRole(['ADMIN', 'MESERO', 'CAJERO']);
+
+      middleware(mockReq, mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockRes.status).not.toHaveBeenCalled();
+    });
+
+    test('extractToken should handle authorization header with extra spaces', () => {
+      mockReq.headers.authorization = '  Bearer   token123  ';
+
+      const token = authMiddleware.extractToken(mockReq);
+
+      expect(token).toBeNull(); // Current implementation doesn't trim spaces
+    });
+
+    test('extractToken should handle authorization header with different casing', () => {
+      mockReq.headers.authorization = 'bearer token123';
+
+      const token = authMiddleware.extractToken(mockReq);
+
+      expect(token).toBeNull(); // Should be case sensitive
+    });
+
+    test('verifyToken should handle database error when finding user', async () => {
+      const validToken = jwt.sign(
+        { id: 1 },
+        process.env.JWT_SECRET || 'tu-secreto-jwt-aqui'
+      );
+      mockReq.headers.authorization = `Bearer ${validToken}`;
+
+      mockUsuarioFindUnique.mockRejectedValue(new Error('Database connection failed'));
+
+      await authMiddleware.verifyToken(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(500);
+      expect(mockRes.json).toHaveBeenCalledWith({ error: 'Error interno del servidor' });
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    test('optionalAuth should handle database error gracefully', async () => {
+      const validToken = jwt.sign(
+        { id: 1 },
+        process.env.JWT_SECRET || 'tu-secreto-jwt-aqui'
+      );
+      mockReq.headers.authorization = `Bearer ${validToken}`;
+
+      mockUsuarioFindUnique.mockRejectedValue(new Error('Database connection failed'));
+
+      await authMiddleware.optionalAuth(mockReq, mockRes, mockNext);
+
+      expect(mockReq.user).toBeNull();
+      expect(mockNext).toHaveBeenCalled();
+    });
+
+    test('requireAdmin should reject non-admin users', () => {
+      mockReq.user = { rol: 'MESERO' };
+
+      const middleware = authMiddleware.requireAdmin();
+      middleware(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(403);
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    test('requireAdmin should handle missing user', () => {
+      mockReq.user = null;
+
+      const middleware = authMiddleware.requireAdmin();
+      middleware(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(401);
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    test('verifyToken should handle token with missing id field', async () => {
+      const tokenWithoutId = jwt.sign(
+        { username: 'test' }, // Missing id field
+        process.env.JWT_SECRET || 'tu-secreto-jwt-aqui'
+      );
+      mockReq.headers.authorization = `Bearer ${tokenWithoutId}`;
+
+      mockUsuarioFindUnique.mockResolvedValue(null); // Simulate user not found
+
+      await authMiddleware.verifyToken(mockReq, mockRes, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(401);
+      expect(mockRes.json).toHaveBeenCalledWith({ error: 'Usuario no encontrado o inactivo' });
+    });
+
+    test('extractToken should handle empty bearer token', () => {
+      mockReq.headers.authorization = 'Bearer ';
+
+      const token = authMiddleware.extractToken(mockReq);
+
+      expect(token).toBe('');
+    });
+  });
 });
