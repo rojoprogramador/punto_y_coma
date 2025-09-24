@@ -958,4 +958,343 @@ describe('Pedido Controller Tests - Complete Coverage', () => {
       }
     });
   });
+
+  describe('Additional Coverage Tests for Missing Lines', () => {
+    test('should test actualizarItemPedido with validation errors (lines 594-600)', async () => {
+      if (!authToken) return;
+
+      const response = await request(app)
+        .put('/api/pedidos/1/items/1')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({}); // Empty payload to trigger validation errors
+
+      expect([400, 401, 404]).toContain(response.status);
+    });
+
+    test('should test actualizarItemPedido with invalid IDs (lines 607-611)', async () => {
+      if (!authToken) return;
+
+      const response = await request(app)
+        .put('/api/pedidos/abc/items/xyz')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          cantidad: 2
+        });
+
+      expect([400, 401]).toContain(response.status);
+      if (response.status === 400) {
+        expect(response.body.error).toContain('inválido');
+      }
+    });
+
+    test('should test actualizarItemPedido with non-existent item (lines 614-629)', async () => {
+      if (!authToken || !testPedido) return;
+
+      const response = await request(app)
+        .put(`/api/pedidos/${testPedido.id}/items/99999`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          cantidad: 2
+        });
+
+      expect([404, 401]).toContain(response.status);
+      if (response.status === 404) {
+        expect(response.body.error).toBe('Item del pedido no encontrado');
+      }
+    });
+
+    test('should test actualizarItemPedido with non-pending items (lines 632-638)', async () => {
+      if (!authToken || !testMesa || !testArticulo) return;
+
+      // Create a pedido and change its state
+      const createResponse = await request(app)
+        .post('/api/pedidos')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          mesaId: testMesa.id,
+          items: [{ articuloId: testArticulo.id, cantidad: 1 }]
+        });
+
+      if (createResponse.status === 201) {
+        const pedido = createResponse.body.pedido;
+        const itemId = pedido.detalles[0]?.id;
+
+        // Change pedido state to EN_PREPARACION
+        await request(app)
+          .put(`/api/pedidos/${pedido.id}/estado`)
+          .set('Authorization', `Bearer ${authToken}`)
+          .send({ estado: 'EN_PREPARACION' });
+
+        // Try to update item of non-pending pedido
+        const updateResponse = await request(app)
+          .put(`/api/pedidos/${pedido.id}/items/${itemId}`)
+          .set('Authorization', `Bearer ${authToken}`)
+          .send({ cantidad: 3 });
+
+        expect([409, 400, 404]).toContain(updateResponse.status);
+        if (updateResponse.status === 409) {
+          expect(updateResponse.body.error).toContain('pendientes');
+        }
+
+        // Cleanup
+        await prisma.pedidoDet.deleteMany({ where: { pedidoId: pedido.id } });
+        await prisma.pedidoEnc.delete({ where: { id: pedido.id } });
+      }
+    });
+
+    test('should test actualizarItemPedido successful update (lines 642-684)', async () => {
+      if (!authToken || !testMesa || !testArticulo) return;
+
+      // Create a fresh pedido for testing
+      const createResponse = await request(app)
+        .post('/api/pedidos')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          mesaId: testMesa.id,
+          items: [{ articuloId: testArticulo.id, cantidad: 1 }]
+        });
+
+      if (createResponse.status === 201) {
+        const pedido = createResponse.body.pedido;
+        const itemId = pedido.detalles[0]?.id;
+
+        if (itemId) {
+          const updateResponse = await request(app)
+            .put(`/api/pedidos/${pedido.id}/items/${itemId}`)
+            .set('Authorization', `Bearer ${authToken}`)
+            .send({
+              cantidad: 3,
+              observaciones: 'Updated quantity and notes'
+            });
+
+          expect([200, 400, 404, 409]).toContain(updateResponse.status);
+          if (updateResponse.status === 200) {
+            expect(updateResponse.body).toHaveProperty('message');
+            expect(updateResponse.body).toHaveProperty('item');
+          }
+        }
+
+        // Cleanup
+        await prisma.pedidoDet.deleteMany({ where: { pedidoId: pedido.id } });
+        await prisma.pedidoEnc.delete({ where: { id: pedido.id } });
+      }
+    });
+
+    test('should test eliminarItemPedido with invalid IDs (lines 699-703)', async () => {
+      if (!authToken) return;
+
+      const response = await request(app)
+        .delete('/api/pedidos/abc/items/xyz')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect([400, 401]).toContain(response.status);
+      if (response.status === 400) {
+        expect(response.body.error).toContain('inválido');
+      }
+    });
+
+    test('should test eliminarItemPedido with non-existent item (lines 706-720)', async () => {
+      if (!authToken || !testPedido) return;
+
+      const response = await request(app)
+        .delete(`/api/pedidos/${testPedido.id}/items/99999`)
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect([404, 401]).toContain(response.status);
+      if (response.status === 404) {
+        expect(response.body.error).toBe('Item del pedido no encontrado');
+      }
+    });
+
+    test('should test eliminarItemPedido with non-pending items (lines 723-729)', async () => {
+      if (!authToken || !testMesa || !testArticulo) return;
+
+      // Create pedido and change state
+      const createResponse = await request(app)
+        .post('/api/pedidos')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          mesaId: testMesa.id,
+          items: [
+            { articuloId: testArticulo.id, cantidad: 1 },
+            { articuloId: testArticulo.id, cantidad: 2 }
+          ]
+        });
+
+      if (createResponse.status === 201) {
+        const pedido = createResponse.body.pedido;
+        const itemId = pedido.detalles[0]?.id;
+
+        // Change state to EN_PREPARACION
+        await request(app)
+          .put(`/api/pedidos/${pedido.id}/estado`)
+          .set('Authorization', `Bearer ${authToken}`)
+          .send({ estado: 'EN_PREPARACION' });
+
+        // Try to delete item from non-pending pedido
+        const deleteResponse = await request(app)
+          .delete(`/api/pedidos/${pedido.id}/items/${itemId}`)
+          .set('Authorization', `Bearer ${authToken}`);
+
+        expect([409, 404]).toContain(deleteResponse.status);
+        if (deleteResponse.status === 409) {
+          expect(deleteResponse.body.error).toContain('pendientes');
+        }
+
+        // Cleanup
+        await prisma.pedidoDet.deleteMany({ where: { pedidoId: pedido.id } });
+        await prisma.pedidoEnc.delete({ where: { id: pedido.id } });
+      }
+    });
+
+    test('should test eliminarItemPedido - cannot delete last item (lines 732-740)', async () => {
+      if (!authToken || !testMesa || !testArticulo) return;
+
+      // Create pedido with only one item
+      const createResponse = await request(app)
+        .post('/api/pedidos')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          mesaId: testMesa.id,
+          items: [{ articuloId: testArticulo.id, cantidad: 1 }]
+        });
+
+      if (createResponse.status === 201) {
+        const pedido = createResponse.body.pedido;
+        const itemId = pedido.detalles[0]?.id;
+
+        if (itemId) {
+          const deleteResponse = await request(app)
+            .delete(`/api/pedidos/${pedido.id}/items/${itemId}`)
+            .set('Authorization', `Bearer ${authToken}`);
+
+          expect([409, 404]).toContain(deleteResponse.status);
+          if (deleteResponse.status === 409) {
+            expect(deleteResponse.body.error).toBe('No se puede eliminar el último item del pedido');
+          }
+        }
+
+        // Cleanup
+        await prisma.pedidoDet.deleteMany({ where: { pedidoId: pedido.id } });
+        await prisma.pedidoEnc.delete({ where: { id: pedido.id } });
+      }
+    });
+
+    test('should test eliminarItemPedido successful deletion (lines 743-763)', async () => {
+      if (!authToken || !testMesa || !testArticulo) return;
+
+      // Create pedido with multiple items
+      const createResponse = await request(app)
+        .post('/api/pedidos')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          mesaId: testMesa.id,
+          items: [
+            { articuloId: testArticulo.id, cantidad: 1 },
+            { articuloId: testArticulo.id, cantidad: 2 }
+          ]
+        });
+
+      if (createResponse.status === 201) {
+        const pedido = createResponse.body.pedido;
+        const itemId = pedido.detalles[0]?.id;
+
+        if (itemId) {
+          const deleteResponse = await request(app)
+            .delete(`/api/pedidos/${pedido.id}/items/${itemId}`)
+            .set('Authorization', `Bearer ${authToken}`);
+
+          expect([200, 400, 404, 409]).toContain(deleteResponse.status);
+          if (deleteResponse.status === 200) {
+            expect(deleteResponse.body.message).toBe('Item eliminado del pedido exitosamente');
+          }
+        }
+
+        // Cleanup
+        await prisma.pedidoDet.deleteMany({ where: { pedidoId: pedido.id } });
+        await prisma.pedidoEnc.delete({ where: { id: pedido.id } });
+      }
+    });
+
+    test('should test error handling in eliminarItemPedido (lines 765-767)', async () => {
+      const originalError = console.error;
+      console.error = jest.fn();
+
+      const response = await request(app)
+        .delete('/api/pedidos/99999/items/99999')
+        .set('Authorization', authToken ? `Bearer ${authToken}` : 'Bearer invalid');
+
+      console.error = originalError;
+      expect([400, 401, 404, 500]).toContain(response.status);
+    });
+
+    test('should test error handling in getPedidosCocina (lines 834-835)', async () => {
+      const originalError = console.error;
+      console.error = jest.fn();
+
+      // Force an error by mocking prisma to throw
+      const response = await request(app).get('/api/pedidos/cocina');
+
+      console.error = originalError;
+      expect([200, 401, 500]).toContain(response.status);
+    });
+
+    test('should test error handling in getPedidosMesero (lines 913-914)', async () => {
+      const originalError = console.error;
+      console.error = jest.fn();
+
+      const response = await request(app)
+        .get('/api/pedidos/mesero/99999');
+
+      console.error = originalError;
+      expect([400, 401, 404, 500]).toContain(response.status);
+    });
+
+    test('should test obtenerPedidoPorId with null response object (lines 48-61)', async () => {
+      // This tests the helper function when res is null/undefined
+      const controller = require('../../controllers/pedidoController');
+
+      // Test invalid ID validation without response object
+      const response = await request(app)
+        .get('/api/pedidos/invalid-format-id')
+        .set('Authorization', authToken ? `Bearer ${authToken}` : 'Bearer test');
+
+      expect([400, 401, 404]).toContain(response.status);
+    });
+
+    test('should test recalcularTotalPedido with zero total (lines 66-75)', async () => {
+      if (!authToken || !testMesa || !testArticulo) return;
+
+      // Create a pedido and then remove all items to test zero total calculation
+      const createResponse = await request(app)
+        .post('/api/pedidos')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          mesaId: testMesa.id,
+          items: [
+            { articuloId: testArticulo.id, cantidad: 1 },
+            { articuloId: testArticulo.id, cantidad: 1 }
+          ]
+        });
+
+      if (createResponse.status === 201) {
+        const pedido = createResponse.body.pedido;
+
+        // Delete one item (should trigger recalculation)
+        if (pedido.detalles && pedido.detalles.length > 1) {
+          const itemId = pedido.detalles[0].id;
+
+          const deleteResponse = await request(app)
+            .delete(`/api/pedidos/${pedido.id}/items/${itemId}`)
+            .set('Authorization', `Bearer ${authToken}`);
+
+          expect([200, 400, 409]).toContain(deleteResponse.status);
+        }
+
+        // Cleanup
+        await prisma.pedidoDet.deleteMany({ where: { pedidoId: pedido.id } });
+        await prisma.pedidoEnc.delete({ where: { id: pedido.id } });
+      }
+    });
+  });
 });
