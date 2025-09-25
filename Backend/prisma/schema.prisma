@@ -47,6 +47,13 @@ enum TipoUsuario {
   CAJERO
 }
 
+enum EstadoFactura {
+  PENDIENTE
+  FACTURADA
+  ENVIADA
+  ANULADA
+}
+
 // Modelo Usuario
 model Usuario {
   id         Int           @id @default(autoincrement())
@@ -192,6 +199,7 @@ model PedidoDet {
 model FacturaEnc {
   id               Int           @id @default(autoincrement())
   numeroFactura    String        @unique @db.VarChar(20)
+  estado           EstadoFactura @default(PENDIENTE)
   fechaFactura     DateTime      @default(now())
   nombreCliente    String?       @db.VarChar(100)
   nifCliente       String?       @db.VarChar(20)
