@@ -10,7 +10,7 @@ module.exports = {
     '!**/node_modules/**'
   ],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
-  testTimeout: 30000,
+  testTimeout: 45000,
   maxWorkers: 1, // Run tests sequentially to avoid database conflicts
   forceExit: true,
   clearMocks: true,

@@ -167,6 +167,15 @@ const mesaController = {
   // PUT /api/mesas/:id/estado
   cambiarEstadoMesa: async (req, res) => {
     try {
+      const { id } = req.params;
+      const mesaId = parseInt(id);
+
+      if (isNaN(mesaId)) {
+        return res.status(400).json({
+          error: 'ID de mesa inválido'
+        });
+      }
+
       // TODO: Implementar cambio de estado
       // 1. Validar nuevo estado
       // 2. Verificar permisos para el cambio
