@@ -73,9 +73,14 @@ const mesaHelpers = {
     }
   },
 
+  // Manejo centralizado de errores
+  logError: (error, contexto = 'mesaController') => {
+    console.error(`Error en ${contexto}:`, error);
+  },
+
   // Respuesta de error estándar
   respuestaError: (res, error) => {
-    console.error('Error en mesaController:', error);
+    mesaHelpers.logError(error);
 
     if (error.message === 'ID de mesa inválido') {
       return res.status(400).json({ error: error.message });
@@ -97,7 +102,7 @@ const mesaHelpers = {
 
   // Manejo genérico de errores para operaciones simples
   manejarErrorGenerico: (res, error, contexto = 'mesaController') => {
-    console.error(`Error en ${contexto}:`, error);
+    mesaHelpers.logError(error, contexto);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 };
