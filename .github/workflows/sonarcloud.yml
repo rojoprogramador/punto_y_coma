@@ -82,7 +82,7 @@ jobs:
           JWT_SECRET: "test-secret-for-ci"
           NODE_ENV: test
       - name: Analyze with SonarCloud
-        uses: SonarSource/sonarcloud-github-action@v2.1.1
+        uses: SonarSource/sonarcloud-github-action@v3.0.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}   # Generate a token on Sonarcloud.io, add it to the secrets of this repo with the name SONAR_TOKEN (Settings > Secrets > Actions > add new repository secret)
         with:
