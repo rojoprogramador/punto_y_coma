@@ -76,23 +76,29 @@ const mesaHelpers = {
   // Respuesta de error estándar
   respuestaError: (res, error) => {
     console.error('Error en mesaController:', error);
-    
+
     if (error.message === 'ID de mesa inválido') {
       return res.status(400).json({ error: error.message });
     }
-    
+
     if (error.message === 'Mesa no encontrada') {
       return res.status(404).json({ error: error.message });
     }
-    
+
     if (error.statusCode) {
       return res.status(error.statusCode).json({
         error: error.message,
         ...(error.details && { details: error.details })
       });
     }
-    
+
     return res.status(500).json({ error: 'Error interno del servidor' });
+  },
+
+  // Manejo genérico de errores para operaciones simples
+  manejarErrorGenerico: (res, error, contexto = 'mesaController') => {
+    console.error(`Error en ${contexto}:`, error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 };
 
@@ -114,8 +120,7 @@ const mesaController = {
         total: mesas.length
       });
     } catch (error) {
-      console.error('Error en getMesas:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      return mesaHelpers.manejarErrorGenerico(res, error, 'getMesas');
     }
   },
 
@@ -148,8 +153,7 @@ const mesaController = {
         total: mesasDisponibles.length
       });
     } catch (error) {
-      console.error('Error en getMesasDisponibles:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      return mesaHelpers.manejarErrorGenerico(res, error, 'getMesasDisponibles');
     }
   },
 
