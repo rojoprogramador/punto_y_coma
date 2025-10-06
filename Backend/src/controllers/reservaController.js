@@ -327,8 +327,8 @@ const reservaController = {
         where: { id: reservaId },
         data: {
           estado: 'CANCELADA',
-          observaciones: reserva.observaciones ? 
-            `${reserva.observaciones}\n\nCANCELADA: ${motivo}` : 
+          observaciones: reserva.observaciones ?
+            `${reserva.observaciones}\n\nCANCELADA: ${motivo}` :
             `CANCELADA: ${motivo}`
         }
       });
