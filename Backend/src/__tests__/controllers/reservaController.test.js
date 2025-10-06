@@ -1,4 +1,3 @@
-describe('Reserva Controller Tests - Basic Structure', () => {
 const request = require('supertest');
 const app = require('../../app');
 const { PrismaClient } = require('@prisma/client');
@@ -315,11 +314,12 @@ describe('Reserva Controller Tests', () => {
         .send(baseReserva);
       expect([401, 404, 500]).toContain(res.status);
     });
-    
+
     afterEach(async () => {
       // Limpiar reservas de prueba
       await prisma.reservaEnc.deleteMany({ where: { nombreCliente: { in: ['Reserva Test User', 'Conflicto'] } } });
     });
+
   });
 
   describe('GET /api/reservas', () => {
@@ -1091,6 +1091,5 @@ describe('Reserva Controller Tests', () => {
         .set('Authorization', `Bearer ${authToken}`);
       expect([400, 500]).toContain(res.status);
     });
-  });
   });
 });
