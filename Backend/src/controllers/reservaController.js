@@ -326,9 +326,9 @@ const reservaController = {
       const reservaCancelada = await prisma.reservaEnc.update({
         where: { id: reservaId },
         data: {
-          estado: 'CA          POST http://localhost:3000/api/reservasNCELADA',
-          observaciones: reserva.observaciones ? 
-            `${reserva.observaciones}\n\nCANCELADA: ${motivo}` : 
+          estado: 'CANCELADA',
+          observaciones: reserva.observaciones ?
+            `${reserva.observaciones}\n\nCANCELADA: ${motivo}` :
             `CANCELADA: ${motivo}`
         }
       });
