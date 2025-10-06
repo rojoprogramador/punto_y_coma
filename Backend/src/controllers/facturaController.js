@@ -191,7 +191,7 @@ const facturaController = {
         detalles: detallesFactura
       });
     } catch (error) {
-      console.error('Error en getFacturaById:', error);
+      console.error('Error en getDetallesByFacturaId:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
     }
   },
